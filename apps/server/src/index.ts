@@ -211,6 +211,9 @@ async function main(): Promise<void> {
       .empty { color: #9ca3af; font-size: 13px; padding: 8px; text-align: center; }
       .hidden { display: none; }
       a { color: #93c5fd; }
+      .actions-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+      .actions-row input { background: #111827; color: #e5e7eb; border: 1px solid #374151; border-radius: 6px; padding: 6px 8px; font-size: 12px; }
+      .actions-row label { font-size: 12px; color: #9ca3af; }
     </style>
   </head>
   <body>
@@ -241,6 +244,14 @@ async function main(): Promise<void> {
       <section class="panel preview">
         <div id="details-title" class="muted"></div>
         <div id="details" class="kv"></div>
+        <div id="quarantine-actions" class="actions-row hidden">
+          <label>Принять:</label>
+          <select id="quarantine-accept"></select>
+          <button id="quarantine-accept-btn">Accept</button>
+          <label>Отклонить:</label>
+          <input id="quarantine-reason" placeholder="Причина" />
+          <button id="quarantine-reject-btn" class="secondary">Reject</button>
+        </div>
         <div id="media"></div>
       </section>
     </div>
@@ -254,7 +265,13 @@ async function main(): Promise<void> {
       const tabQuarantine = document.getElementById("tab-quarantine");
       const tabDuplicates = document.getElementById("tab-duplicates");
       const quarantineFilter = document.getElementById("quarantine-filter");
+      const quarantineActions = document.getElementById("quarantine-actions");
+      const quarantineAccept = document.getElementById("quarantine-accept");
+      const quarantineAcceptBtn = document.getElementById("quarantine-accept-btn");
+      const quarantineReason = document.getElementById("quarantine-reason");
+      const quarantineRejectBtn = document.getElementById("quarantine-reject-btn");
       let currentTab = "media";
+      let currentQuarantineItem = null;
 
       const fmtBytes = (value) => {
         if (!Number.isFinite(value)) return "-";
@@ -284,10 +301,12 @@ async function main(): Promise<void> {
           detailsEl.innerHTML = "";
           mediaEl.innerHTML = "";
           detailsTitleEl.textContent = "";
+          quarantineActions.classList.add("hidden");
           return;
         }
         const { media, metadata } = data;
         detailsTitleEl.textContent = "Media";
+        quarantineActions.classList.add("hidden");
         renderKV([
           ["mediaId", media.mediaId],
           ["sha256", media.sha256],
@@ -314,6 +333,7 @@ async function main(): Promise<void> {
       const renderQuarantineDetails = (item) => {
         detailsTitleEl.textContent = "Quarantine";
         mediaEl.innerHTML = "";
+        currentQuarantineItem = item ?? null;
         renderKV([
           ["quarantineId", item?.quarantineId ?? "-"],
           ["status", item?.status ?? "-"],
@@ -324,11 +344,22 @@ async function main(): Promise<void> {
           ["createdAt", item?.createdAt ? new Date(item.createdAt).toISOString() : "-"],
           ["resolvedAt", item?.resolvedAt ? new Date(item.resolvedAt).toISOString() : "-"]
         ]);
+        if (item && item.status === "pending") {
+          const candidates = Array.isArray(item.candidateMediaIds) ? item.candidateMediaIds : [];
+          quarantineAccept.innerHTML = candidates
+            .map((id) => "<option value=\\"" + id + "\\">" + id + "</option>")
+            .join("");
+          quarantineReason.value = "";
+          quarantineActions.classList.remove("hidden");
+        } else {
+          quarantineActions.classList.add("hidden");
+        }
       };
 
       const renderDuplicateDetails = (link) => {
         detailsTitleEl.textContent = "Duplicate link";
         mediaEl.innerHTML = "";
+        quarantineActions.classList.add("hidden");
         renderKV([
           ["duplicateLinkId", link?.duplicateLinkId ?? "-"],
           ["level", link?.level ?? "-"],
@@ -344,6 +375,7 @@ async function main(): Promise<void> {
         detailsEl.innerHTML = "";
         mediaEl.innerHTML = "";
         detailsTitleEl.textContent = "";
+        quarantineActions.classList.add("hidden");
         const res = await fetch("/media");
         if (!res.ok) {
           renderEmpty("Ошибка загрузки списка");
@@ -380,6 +412,7 @@ async function main(): Promise<void> {
         detailsEl.innerHTML = "";
         mediaEl.innerHTML = "";
         detailsTitleEl.textContent = "";
+        quarantineActions.classList.add("hidden");
         const status = quarantineFilter.value;
         const url = status ? "/quarantine?status=" + status : "/quarantine";
         const res = await fetch(url);
@@ -420,6 +453,7 @@ async function main(): Promise<void> {
         detailsEl.innerHTML = "";
         mediaEl.innerHTML = "";
         detailsTitleEl.textContent = "";
+        quarantineActions.classList.add("hidden");
         const res = await fetch("/duplicate-links");
         if (!res.ok) {
           renderEmpty("Ошибка загрузки duplicate links");
@@ -451,6 +485,10 @@ async function main(): Promise<void> {
         tabQuarantine.classList.toggle("active", tab === "quarantine");
         tabDuplicates.classList.toggle("active", tab === "duplicates");
         quarantineFilter.classList.toggle("hidden", tab !== "quarantine");
+        if (tab !== "quarantine") {
+          currentQuarantineItem = null;
+          quarantineActions.classList.add("hidden");
+        }
         if (tab === "media") {
           loadMediaList();
         } else if (tab === "quarantine") {
@@ -460,11 +498,34 @@ async function main(): Promise<void> {
         }
       };
 
+      const submitQuarantine = async (action) => {
+        if (!currentQuarantineItem) return;
+        const url = "/quarantine/" + currentQuarantineItem.quarantineId + "/" + action;
+        const payload = action === "accept"
+          ? { acceptedMediaId: quarantineAccept.value }
+          : { reason: quarantineReason.value.trim() || undefined };
+        const resp = await fetch(url, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (resp.ok) {
+          loadQuarantineList();
+          const detailsResp = await fetch("/quarantine/" + currentQuarantineItem.quarantineId);
+          if (detailsResp.ok) {
+            const details = await detailsResp.json();
+            renderQuarantineDetails(details.item);
+          }
+        }
+      };
+
       tabMedia.addEventListener("click", () => setTab("media"));
       tabQuarantine.addEventListener("click", () => setTab("quarantine"));
       tabDuplicates.addEventListener("click", () => setTab("duplicates"));
       quarantineFilter.addEventListener("change", loadQuarantineList);
       reloadBtn.addEventListener("click", () => setTab(currentTab));
+      quarantineAcceptBtn.addEventListener("click", () => submitQuarantine("accept"));
+      quarantineRejectBtn.addEventListener("click", () => submitQuarantine("reject"));
       setTab("media");
     </script>
   </body>

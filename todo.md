@@ -91,3 +91,9 @@
 ### Подзадачи
 - [x] Добавить вкладки для quarantine и duplicate links в /ui
 - [x] Проверить build/test
+
+## 2026-02-15 — Действия quarantine
+
+### Подзадачи
+- [x] Добавить accept/reject действия в /ui
+- [x] Проверить build/test
