@@ -1,4 +1,5 @@
 import http, { IncomingMessage, ServerResponse } from "node:http";
+import { createReadStream, promises as fs } from "node:fs";
 import path from "node:path";
 import {
   createEvent,
@@ -16,6 +17,7 @@ import {
   VaultLayout,
   WalWriter,
   ensureDir,
+  mediaPathForSha256,
   readWalRecords,
   rebuildDomainState
 } from "@family-media-vault/storage";
@@ -295,6 +297,34 @@ async function main(): Promise<void> {
         }
         const duplicateLinks = state.duplicateLinks.list().filter((link) => link.mediaId === mediaId);
         sendJson(res, 200, { media, metadata: state.metadata.get(mediaId), duplicateLinks });
+        return;
+      }
+
+      if (method === "GET" && parts.length === 3 && parts[0] === "media" && parts[2] === "file") {
+        const mediaId = asMediaId(parts[1] ?? "");
+        const media = state.media.get(mediaId);
+        if (!media) {
+          sendJson(res, 404, { error: "media_not_found" });
+          return;
+        }
+
+        const filePath = mediaPathForSha256(vault, media.sha256);
+        try {
+          const stat = await fs.stat(filePath);
+          const metadata = state.metadata.get(mediaId);
+          const mimeType =
+            metadata && typeof metadata.mimeType === "string"
+              ? metadata.mimeType
+              : "application/octet-stream";
+
+          res.writeHead(200, {
+            "content-type": mimeType,
+            "content-length": stat.size
+          });
+          createReadStream(filePath).pipe(res);
+        } catch {
+          sendJson(res, 404, { error: "media_file_not_found" });
+        }
         return;
       }
 

@@ -67,3 +67,9 @@
 - [x] Добавить эндпоинты duplicate-links list с фильтрами
 - [x] Добавить эндпоинты entries list и entry status view
 - [x] Проверить build/test
+
+## 2026-02-15 — Отдача оригиналов из Vault
+
+### Подзадачи
+- [x] Добавить эндпоинт media/:id/file
+- [x] Проверить build/test
