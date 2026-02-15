@@ -86,5 +86,9 @@ export function createIngestJobHandler(options: IngestHandlerOptions) {
       mediaId: media.mediaId,
       sourceEntryId: entryId
     });
+
+    await options.jobEngine.enqueue("dedup:probable", {
+      sourceEntryId: entryId
+    });
   };
 }

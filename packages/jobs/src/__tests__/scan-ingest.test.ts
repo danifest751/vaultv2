@@ -14,6 +14,7 @@ import {
 } from "@family-media-vault/storage";
 import { JobEngine } from "../job-engine";
 import { JobStore } from "../job-store";
+import { createProbableDedupJobHandler } from "../dedup";
 import { createIngestJobHandler } from "../ingest";
 import { createMetadataJobHandler } from "../metadata";
 import { createScanJobHandler } from "../scan";
@@ -71,6 +72,14 @@ describe("scan + ingest stage A/B", () => {
     jobEngine.register({
       kind: "metadata:extract",
       handler: createMetadataJobHandler({
+        state,
+        appendEvent
+      })
+    });
+    
+    jobEngine.register({
+      kind: "dedup:probable",
+      handler: createProbableDedupJobHandler({
         state,
         appendEvent
       })
@@ -159,6 +168,14 @@ describe("scan + ingest stage A/B", () => {
     });
 
     jobEngine.register({
+      kind: "dedup:probable",
+      handler: createProbableDedupJobHandler({
+        state,
+        appendEvent
+      })
+    });
+
+    jobEngine.register({
       kind: "ingest:stage-a-b",
       handler: createIngestJobHandler({
         state,
@@ -205,6 +222,102 @@ describe("scan + ingest stage A/B", () => {
 
     expect(events).toContain("MEDIA_SKIPPED_DUPLICATE_EXACT");
     expect(events).toContain("DUPLICATE_LINK_CREATED");
+
+    await writer.close();
+  });
+
+  it("creates quarantine for probable duplicates", async () => {
+    const baseDir = await mkdtemp(path.join(tmpdir(), "fmv-probable-"));
+    const sourceDir = path.join(baseDir, "source");
+    const vaultDir = path.join(baseDir, "vault");
+
+    await mkdir(sourceDir, { recursive: true });
+    const head = Buffer.alloc(64 * 1024, 7);
+    const tailA = Buffer.from("tail-1");
+    const tailB = Buffer.from("tail-2");
+    await writeFile(path.join(sourceDir, "a.jpg"), Buffer.concat([head, tailA]));
+    await writeFile(path.join(sourceDir, "b.jpg"), Buffer.concat([head, tailB]));
+
+    const walDir = path.join(baseDir, "wal");
+    const writer = await WalWriter.create({ walDir, hmacSecret: HMAC_SECRET, fsync: false });
+
+    const state = new DomainState();
+    const jobStore = new JobStore();
+    const appendEvent = async (event: ReturnType<typeof createEvent>) => {
+      await writer.append(event);
+      state.applyEvent(event);
+    };
+
+    const jobEngine = new JobEngine({
+      store: jobStore,
+      eventWriter: { append: appendEvent },
+      concurrency: 1
+    });
+
+    const vault: VaultLayout = { root: vaultDir };
+
+    jobEngine.register({
+      kind: "scan:source",
+      handler: createScanJobHandler({
+        state,
+        appendEvent,
+        jobEngine
+      })
+    });
+
+    jobEngine.register({
+      kind: "ingest:stage-a-b",
+      handler: createIngestJobHandler({
+        state,
+        appendEvent,
+        vault,
+        jobEngine
+      })
+    });
+
+    jobEngine.register({
+      kind: "metadata:extract",
+      handler: createMetadataJobHandler({
+        state,
+        appendEvent
+      })
+    });
+
+    jobEngine.register({
+      kind: "dedup:probable",
+      handler: createProbableDedupJobHandler({
+        state,
+        appendEvent
+      })
+    });
+
+    const sourceId = newSourceId();
+    await appendEvent(
+      createEvent("SOURCE_CREATED", {
+        source: {
+          sourceId,
+          path: sourceDir,
+          recursive: true,
+          includeArchives: false,
+          excludeGlobs: [],
+          createdAt: Date.now()
+        }
+      })
+    );
+
+    await jobEngine.enqueue("scan:source", { sourceId });
+    await jobEngine.runUntilIdle();
+
+    const media = state.media.list();
+    expect(media).toHaveLength(2);
+
+    const quarantineItems = state.quarantine.list();
+    expect(quarantineItems).toHaveLength(1);
+
+    const candidateIds = new Set(quarantineItems[0].candidateMediaIds);
+    for (const item of media) {
+      expect(candidateIds.has(item.mediaId)).toBe(true);
+    }
 
     await writer.close();
   });

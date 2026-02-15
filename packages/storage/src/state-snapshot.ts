@@ -1,7 +1,9 @@
 import {
+  DuplicateLink,
   Media,
   MediaId,
   MediaMetadata,
+  QuarantineItem,
   Source,
   SourceEntry,
   SourceEntryId
@@ -9,11 +11,13 @@ import {
 import { DomainState, IngestStatus } from "./state";
 
 export type DomainSnapshotRecord =
+  | { kind: "duplicateLink"; link: DuplicateLink }
   | { kind: "source"; source: Source }
   | { kind: "sourceEntry"; entry: SourceEntry }
   | { kind: "media"; media: Media }
   | { kind: "ingestStatus"; sourceEntryId: SourceEntryId; status: IngestStatus }
-  | { kind: "metadata"; mediaId: MediaId; metadata: MediaMetadata };
+  | { kind: "metadata"; mediaId: MediaId; metadata: MediaMetadata }
+  | { kind: "quarantine"; item: QuarantineItem };
 
 export function* snapshotDomainState(state: DomainState): Iterable<DomainSnapshotRecord> {
   for (const source of state.sources.listSources()) {
@@ -21,6 +25,9 @@ export function* snapshotDomainState(state: DomainState): Iterable<DomainSnapsho
   }
   for (const entry of state.sources.listEntries()) {
     yield { kind: "sourceEntry", entry };
+  }
+  for (const link of state.duplicateLinks.list()) {
+    yield { kind: "duplicateLink", link };
   }
   for (const media of state.media.list()) {
     yield { kind: "media", media };
@@ -30,6 +37,9 @@ export function* snapshotDomainState(state: DomainState): Iterable<DomainSnapsho
   }
   for (const { mediaId, metadata } of state.metadata.list()) {
     yield { kind: "metadata", mediaId, metadata };
+  }
+  for (const item of state.quarantine.list()) {
+    yield { kind: "quarantine", item };
   }
 }
 
@@ -51,6 +61,9 @@ export async function rebuildDomainStateFromSnapshot(
 
 function applySnapshotRecord(state: DomainState, record: DomainSnapshotRecord): void {
   switch (record.kind) {
+    case "duplicateLink":
+      state.duplicateLinks.set(record.link);
+      return;
     case "source":
       state.sources.upsertSource(record.source);
       return;
@@ -65,6 +78,9 @@ function applySnapshotRecord(state: DomainState, record: DomainSnapshotRecord): 
       return;
     case "metadata":
       state.metadata.set(record.mediaId, record.metadata);
+      return;
+    case "quarantine":
+      state.quarantine.set(record.item);
       return;
     default: {
       const _exhaustive: never = record;
