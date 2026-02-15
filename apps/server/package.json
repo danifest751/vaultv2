@@ -1,0 +1,16 @@
+{
+  "name": "@family-media-vault/server",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@family-media-vault/core": "file:../../packages/core",
+    "@family-media-vault/jobs": "file:../../packages/jobs",
+    "@family-media-vault/storage": "file:../../packages/storage"
+  }
+}

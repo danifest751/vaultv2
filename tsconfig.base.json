@@ -4,6 +4,10 @@
     "module": "CommonJS",
     "moduleResolution": "Node",
     "lib": ["ES2022"],
+    "baseUrl": ".",
+    "paths": {
+      "@family-media-vault/*": ["packages/*/src"]
+    },
     "strict": true,
     "declaration": true,
     "sourceMap": true,

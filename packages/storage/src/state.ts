@@ -84,17 +84,11 @@ export class SourceStore {
     | SourceEntry
     | undefined {
     const key = this.entryKey({
-      sourceEntryId: "" as SourceEntryId,
       sourceId,
       kind,
       path,
       archivePath,
-      innerPath,
-      size: 0,
-      mtimeMs: 0,
-      fingerprint: "",
-      lastSeenAt: 0,
-      state: "active"
+      innerPath
     });
     const entryId = this.entryKeyIndex.get(key);
     return entryId ? this.entries.get(entryId) : undefined;

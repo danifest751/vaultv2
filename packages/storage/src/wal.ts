@@ -117,7 +117,8 @@ export class WalWriter {
   static async create(options: WalOptions): Promise<WalWriter> {
     await ensureDir(options.walDir);
     const segments = await listSegments(options.walDir);
-    let currentSegmentId = segments.length > 0 ? segments[segments.length - 1] : 1;
+    const lastSegment = segments[segments.length - 1];
+    let currentSegmentId = lastSegment ?? 1;
     let currentPath = segmentPath(options.walDir, currentSegmentId);
 
     let lastSeq = 0;
@@ -166,7 +167,7 @@ export class WalWriter {
     const record: WalRecord = { ...recordBase, hash };
     const line = `${JSON.stringify(record)}\n`;
 
-    await this.handle.write(line, "utf8");
+    await this.handle.write(line, undefined, "utf8");
     if (this.fsync) {
       await this.handle.sync();
     }

@@ -32,7 +32,7 @@ export async function writeSnapshot<T>(options: SnapshotWriteOptions<T>): Promis
   try {
     for await (const record of toAsyncIterable(options.records)) {
       const line = `${JSON.stringify(record)}\n`;
-      await handle.write(line, "utf8");
+      await handle.write(line, undefined, "utf8");
     }
   } finally {
     await handle.close();
