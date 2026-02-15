@@ -1,0 +1,17 @@
+{
+  "name": "@family-media-vault/jobs",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@family-media-vault/core": "file:../core",
+    "@family-media-vault/storage": "file:../storage"
+  }
+}

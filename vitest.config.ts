@@ -7,6 +7,14 @@ export default defineConfig({
       "@family-media-vault/core": path.resolve(
         __dirname,
         "packages/core/src/index.ts"
+      ),
+      "@family-media-vault/storage": path.resolve(
+        __dirname,
+        "packages/storage/src/index.ts"
+      ),
+      "@family-media-vault/jobs": path.resolve(
+        __dirname,
+        "packages/jobs/src/index.ts"
       )
     }
   },

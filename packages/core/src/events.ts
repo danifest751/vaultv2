@@ -13,6 +13,10 @@ import { assertNonEmptyString } from "./invariants";
 
 export type TimestampMs = number;
 
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
+export type JsonObject = { [key: string]: JsonValue };
+
 export type SourceEntryKind = "file" | "archive_entry";
 export type SourceEntryState = "active" | "missing" | "deleted";
 
@@ -79,6 +83,7 @@ export type EventType =
   | "DUPLICATE_LINK_CREATED"
   | "QUARANTINE_CREATED"
   | "JOB_ENQUEUED"
+  | "JOB_STARTED"
   | "JOB_COMPLETED"
   | "JOB_FAILED";
 
@@ -97,7 +102,8 @@ export type EventPayloads = {
   MEDIA_SKIPPED_DUPLICATE_EXACT: { sourceEntryId: SourceEntryId; existingMediaId: MediaId };
   DUPLICATE_LINK_CREATED: { link: DuplicateLink };
   QUARANTINE_CREATED: { item: QuarantineItem };
-  JOB_ENQUEUED: { jobId: JobId; kind: string };
+  JOB_ENQUEUED: { jobId: JobId; kind: string; payload?: JsonObject };
+  JOB_STARTED: { jobId: JobId; kind: string; attempt: number };
   JOB_COMPLETED: { jobId: JobId };
   JOB_FAILED: { jobId: JobId; error: string };
 };
