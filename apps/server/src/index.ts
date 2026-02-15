@@ -186,49 +186,75 @@ async function main(): Promise<void> {
     <style>
       :root { color-scheme: light dark; }
       body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 24px; background: #0f1115; color: #e5e7eb; }
-      header { display: flex; align-items: baseline; gap: 16px; margin-bottom: 16px; }
+      header { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
       h1 { font-size: 20px; margin: 0; }
       .muted { color: #9ca3af; font-size: 13px; }
-      .layout { display: grid; grid-template-columns: 320px 1fr; gap: 16px; }
+      .layout { display: grid; grid-template-columns: 340px 1fr; gap: 16px; }
       .panel { background: #161a22; border: 1px solid #1f2937; border-radius: 10px; padding: 12px; }
       .list { display: flex; flex-direction: column; gap: 8px; max-height: 70vh; overflow: auto; }
       .item { border: 1px solid #1f2937; border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 6px; cursor: pointer; }
       .item:hover { border-color: #374151; }
       .id { font-size: 12px; color: #93c5fd; word-break: break-all; }
       .meta { font-size: 12px; color: #9ca3af; }
-      .actions { display: flex; gap: 8px; }
+      .actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+      .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
       button { background: #2563eb; border: none; color: white; padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 12px; }
       button.secondary { background: #374151; }
+      button.tab { background: #1f2937; color: #e5e7eb; }
+      button.tab.active { background: #2563eb; color: white; }
+      .actions-right { display: flex; gap: 8px; align-items: center; }
+      select { background: #111827; color: #e5e7eb; border: 1px solid #374151; border-radius: 6px; padding: 6px 8px; font-size: 12px; }
       .preview { display: flex; flex-direction: column; gap: 12px; }
       .preview img, .preview video { max-width: 100%; border-radius: 8px; background: #0b0d12; }
       .kv { display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px; font-size: 13px; }
       .kv div { word-break: break-all; }
       .empty { color: #9ca3af; font-size: 13px; padding: 8px; text-align: center; }
+      .hidden { display: none; }
       a { color: #93c5fd; }
     </style>
   </head>
   <body>
     <header>
       <h1>Family Media Vault</h1>
-      <span class="muted">Минимальный viewer для /media</span>
+      <span class="muted">Viewer: media, quarantine, duplicate links</span>
     </header>
     <div class="layout">
       <section class="panel">
         <div class="actions">
-          <button id="reload">Обновить</button>
+          <div class="tabs">
+            <button id="tab-media" class="tab active">Media</button>
+            <button id="tab-quarantine" class="tab">Quarantine</button>
+            <button id="tab-duplicates" class="tab">Duplicate links</button>
+          </div>
+          <div class="actions-right">
+            <select id="quarantine-filter" class="hidden">
+              <option value="">Все</option>
+              <option value="pending">Ожидает</option>
+              <option value="accepted">Принято</option>
+              <option value="rejected">Отклонено</option>
+            </select>
+            <button id="reload" class="secondary">Обновить</button>
+          </div>
         </div>
         <div id="list" class="list" aria-live="polite"></div>
       </section>
       <section class="panel preview">
+        <div id="details-title" class="muted"></div>
         <div id="details" class="kv"></div>
         <div id="media"></div>
       </section>
     </div>
     <script>
       const listEl = document.getElementById("list");
+      const detailsTitleEl = document.getElementById("details-title");
       const detailsEl = document.getElementById("details");
       const mediaEl = document.getElementById("media");
       const reloadBtn = document.getElementById("reload");
+      const tabMedia = document.getElementById("tab-media");
+      const tabQuarantine = document.getElementById("tab-quarantine");
+      const tabDuplicates = document.getElementById("tab-duplicates");
+      const quarantineFilter = document.getElementById("quarantine-filter");
+      let currentTab = "media";
 
       const fmtBytes = (value) => {
         if (!Number.isFinite(value)) return "-";
@@ -243,18 +269,26 @@ async function main(): Promise<void> {
         return size.toFixed(1) + " " + units[idx];
       };
 
-      const renderEmpty = () => {
-        listEl.innerHTML = "<div class=\\"empty\\">Нет данных. Добавьте source и запустите scan.</div>";
+      const renderEmpty = (message) => {
+        listEl.innerHTML = "<div class=\\"empty\\">" + message + "</div>";
       };
 
-      const renderDetails = (data) => {
+      const renderKV = (rows) => {
+        detailsEl.innerHTML = rows
+          .map(([k, v]) => "<div class=\\"meta\\">" + k + "</div><div>" + v + "</div>")
+          .join("");
+      };
+
+      const renderMediaDetails = (data) => {
         if (!data || !data.media) {
           detailsEl.innerHTML = "";
           mediaEl.innerHTML = "";
+          detailsTitleEl.textContent = "";
           return;
         }
         const { media, metadata } = data;
-        detailsEl.innerHTML = [
+        detailsTitleEl.textContent = "Media";
+        renderKV([
           ["mediaId", media.mediaId],
           ["sha256", media.sha256],
           ["size", fmtBytes(media.size)],
@@ -265,7 +299,7 @@ async function main(): Promise<void> {
           ["height", metadata?.height ?? "-"],
           ["durationMs", metadata?.durationMs ?? "-"],
           ["takenAt", metadata?.takenAt ? new Date(metadata.takenAt).toISOString() : "-"]
-        ].map(([k,v]) => "<div class=\\"meta\\">" + k + "</div><div>" + v + "</div>").join("");
+        ]);
         const fileUrl = "/media/" + media.mediaId + "/file";
         const mime = metadata?.mimeType ?? "";
         if (mime.startsWith("image/")) {
@@ -277,19 +311,48 @@ async function main(): Promise<void> {
         }
       };
 
-      const loadMedia = async () => {
+      const renderQuarantineDetails = (item) => {
+        detailsTitleEl.textContent = "Quarantine";
+        mediaEl.innerHTML = "";
+        renderKV([
+          ["quarantineId", item?.quarantineId ?? "-"],
+          ["status", item?.status ?? "-"],
+          ["sourceEntryId", item?.sourceEntryId ?? "-"],
+          ["candidateMediaIds", Array.isArray(item?.candidateMediaIds) ? item.candidateMediaIds.join(", ") : "-"],
+          ["acceptedMediaId", item?.acceptedMediaId ?? "-"],
+          ["rejectedReason", item?.rejectedReason ?? "-"],
+          ["createdAt", item?.createdAt ? new Date(item.createdAt).toISOString() : "-"],
+          ["resolvedAt", item?.resolvedAt ? new Date(item.resolvedAt).toISOString() : "-"]
+        ]);
+      };
+
+      const renderDuplicateDetails = (link) => {
+        detailsTitleEl.textContent = "Duplicate link";
+        mediaEl.innerHTML = "";
+        renderKV([
+          ["duplicateLinkId", link?.duplicateLinkId ?? "-"],
+          ["level", link?.level ?? "-"],
+          ["mediaId", link?.mediaId ?? "-"],
+          ["sourceEntryId", link?.sourceEntryId ?? "-"],
+          ["reason", link?.reason ?? "-"],
+          ["createdAt", link?.createdAt ? new Date(link.createdAt).toISOString() : "-"]
+        ]);
+      };
+
+      const loadMediaList = async () => {
         listEl.innerHTML = "<div class=\\"empty\\">Загрузка...</div>";
         detailsEl.innerHTML = "";
         mediaEl.innerHTML = "";
+        detailsTitleEl.textContent = "";
         const res = await fetch("/media");
         if (!res.ok) {
-          listEl.innerHTML = "<div class=\\"empty\\">Ошибка загрузки списка</div>";
+          renderEmpty("Ошибка загрузки списка");
           return;
         }
         const data = await res.json();
         const items = data.media ?? [];
         if (items.length === 0) {
-          renderEmpty();
+          renderEmpty("Нет данных. Добавьте source и запустите scan.");
           return;
         }
         listEl.innerHTML = "";
@@ -302,18 +365,107 @@ async function main(): Promise<void> {
           card.addEventListener("click", async () => {
             const resp = await fetch("/media/" + item.mediaId);
             if (!resp.ok) {
-              renderDetails(null);
+              renderMediaDetails(null);
               return;
             }
             const details = await resp.json();
-            renderDetails(details);
+            renderMediaDetails(details);
           });
           listEl.appendChild(card);
         });
       };
 
-      reloadBtn.addEventListener("click", loadMedia);
-      loadMedia();
+      const loadQuarantineList = async () => {
+        listEl.innerHTML = "<div class=\\"empty\\">Загрузка...</div>";
+        detailsEl.innerHTML = "";
+        mediaEl.innerHTML = "";
+        detailsTitleEl.textContent = "";
+        const status = quarantineFilter.value;
+        const url = status ? "/quarantine?status=" + status : "/quarantine";
+        const res = await fetch(url);
+        if (!res.ok) {
+          renderEmpty("Ошибка загрузки quarantine");
+          return;
+        }
+        const data = await res.json();
+        const items = data.items ?? [];
+        if (items.length === 0) {
+          renderEmpty("Пусто");
+          return;
+        }
+        listEl.innerHTML = "";
+        items.forEach((item) => {
+          const card = document.createElement("div");
+          card.className = "item";
+          const candidateCount = Array.isArray(item.candidateMediaIds) ? item.candidateMediaIds.length : 0;
+          card.innerHTML = "<div class=\\"id\\">" + item.quarantineId + "</div>" +
+            "<div class=\\"meta\\">" + item.status + "</div>" +
+            "<div class=\\"meta\\">" + item.sourceEntryId + "</div>" +
+            "<div class=\\"meta\\">candidates: " + candidateCount + "</div>";
+          card.addEventListener("click", async () => {
+            const resp = await fetch("/quarantine/" + item.quarantineId);
+            if (!resp.ok) {
+              renderQuarantineDetails(null);
+              return;
+            }
+            const details = await resp.json();
+            renderQuarantineDetails(details.item);
+          });
+          listEl.appendChild(card);
+        });
+      };
+
+      const loadDuplicateLinks = async () => {
+        listEl.innerHTML = "<div class=\\"empty\\">Загрузка...</div>";
+        detailsEl.innerHTML = "";
+        mediaEl.innerHTML = "";
+        detailsTitleEl.textContent = "";
+        const res = await fetch("/duplicate-links");
+        if (!res.ok) {
+          renderEmpty("Ошибка загрузки duplicate links");
+          return;
+        }
+        const data = await res.json();
+        const links = data.links ?? [];
+        if (links.length === 0) {
+          renderEmpty("Пусто");
+          return;
+        }
+        listEl.innerHTML = "";
+        links.forEach((link) => {
+          const card = document.createElement("div");
+          card.className = "item";
+          card.innerHTML = "<div class=\\"id\\">" + link.duplicateLinkId + "</div>" +
+            "<div class=\\"meta\\">" + link.level + "</div>" +
+            "<div class=\\"meta\\">" + link.mediaId + "</div>";
+          card.addEventListener("click", () => {
+            renderDuplicateDetails(link);
+          });
+          listEl.appendChild(card);
+        });
+      };
+
+      const setTab = (tab) => {
+        currentTab = tab;
+        tabMedia.classList.toggle("active", tab === "media");
+        tabQuarantine.classList.toggle("active", tab === "quarantine");
+        tabDuplicates.classList.toggle("active", tab === "duplicates");
+        quarantineFilter.classList.toggle("hidden", tab !== "quarantine");
+        if (tab === "media") {
+          loadMediaList();
+        } else if (tab === "quarantine") {
+          loadQuarantineList();
+        } else {
+          loadDuplicateLinks();
+        }
+      };
+
+      tabMedia.addEventListener("click", () => setTab("media"));
+      tabQuarantine.addEventListener("click", () => setTab("quarantine"));
+      tabDuplicates.addEventListener("click", () => setTab("duplicates"));
+      quarantineFilter.addEventListener("change", loadQuarantineList);
+      reloadBtn.addEventListener("click", () => setTab(currentTab));
+      setTab("media");
     </script>
   </body>
 </html>`

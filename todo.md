@@ -85,3 +85,9 @@
 ### Подзадачи
 - [x] Добавить HTML viewer на /ui
 - [x] Проверить build/test
+
+## 2026-02-15 — Viewer для quarantine и duplicate links
+
+### Подзадачи
+- [x] Добавить вкладки для quarantine и duplicate links в /ui
+- [x] Проверить build/test

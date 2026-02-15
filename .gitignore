@@ -5,5 +5,7 @@ dist/
 
 coverage/
 
+data/
+
 .vscode/
 .DS_Store
