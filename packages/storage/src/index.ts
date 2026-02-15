@@ -1,5 +1,6 @@
 export * from "./hash";
 export * from "./metadata";
+export * from "./rebuild";
 export * from "./snapshot";
 export * from "./state-snapshot";
 export * from "./state";
