@@ -1,0 +1,74 @@
+import {
+  Media,
+  MediaId,
+  MediaMetadata,
+  Source,
+  SourceEntry,
+  SourceEntryId
+} from "@family-media-vault/core";
+import { DomainState, IngestStatus } from "./state";
+
+export type DomainSnapshotRecord =
+  | { kind: "source"; source: Source }
+  | { kind: "sourceEntry"; entry: SourceEntry }
+  | { kind: "media"; media: Media }
+  | { kind: "ingestStatus"; sourceEntryId: SourceEntryId; status: IngestStatus }
+  | { kind: "metadata"; mediaId: MediaId; metadata: MediaMetadata };
+
+export function* snapshotDomainState(state: DomainState): Iterable<DomainSnapshotRecord> {
+  for (const source of state.sources.listSources()) {
+    yield { kind: "source", source };
+  }
+  for (const entry of state.sources.listEntries()) {
+    yield { kind: "sourceEntry", entry };
+  }
+  for (const media of state.media.list()) {
+    yield { kind: "media", media };
+  }
+  for (const { sourceEntryId, status } of state.ingest.listStatuses()) {
+    yield { kind: "ingestStatus", sourceEntryId, status };
+  }
+  for (const { mediaId, metadata } of state.metadata.list()) {
+    yield { kind: "metadata", mediaId, metadata };
+  }
+}
+
+export async function rebuildDomainStateFromSnapshot(
+  records: Iterable<DomainSnapshotRecord> | AsyncIterable<DomainSnapshotRecord>
+): Promise<DomainState> {
+  const state = new DomainState();
+  if (Symbol.asyncIterator in records) {
+    for await (const record of records as AsyncIterable<DomainSnapshotRecord>) {
+      applySnapshotRecord(state, record);
+    }
+  } else {
+    for (const record of records as Iterable<DomainSnapshotRecord>) {
+      applySnapshotRecord(state, record);
+    }
+  }
+  return state;
+}
+
+function applySnapshotRecord(state: DomainState, record: DomainSnapshotRecord): void {
+  switch (record.kind) {
+    case "source":
+      state.sources.upsertSource(record.source);
+      return;
+    case "sourceEntry":
+      state.sources.upsertEntry(record.entry);
+      return;
+    case "media":
+      state.media.upsertMedia(record.media);
+      return;
+    case "ingestStatus":
+      state.ingest.setStatus(record.sourceEntryId, record.status);
+      return;
+    case "metadata":
+      state.metadata.set(record.mediaId, record.metadata);
+      return;
+    default: {
+      const _exhaustive: never = record;
+      return _exhaustive;
+    }
+  }
+}

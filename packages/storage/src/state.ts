@@ -60,6 +60,19 @@ export class SourceStore {
     return Array.from(this.sources.values());
   }
 
+  listEntries(): SourceEntry[] {
+    return Array.from(this.entries.values());
+  }
+
+  upsertSource(source: Source): void {
+    this.sources.set(source.sourceId, source);
+  }
+
+  upsertEntry(entry: SourceEntry): void {
+    this.entries.set(entry.sourceEntryId, entry);
+    this.entryKeyIndex.set(this.entryKey(entry), entry.sourceEntryId);
+  }
+
   getEntry(entryId: SourceEntryId): SourceEntry | undefined {
     return this.entries.get(entryId);
   }
@@ -113,6 +126,11 @@ export class MediaStore {
     }
   }
 
+  upsertMedia(media: Media): void {
+    this.mediaBySha.set(media.sha256, media);
+    this.mediaById.set(media.mediaId, media);
+  }
+
   getBySha256(sha256: string): Media | undefined {
     return this.mediaBySha.get(sha256);
   }
@@ -156,6 +174,17 @@ export class IngestStore {
   getStatus(entryId: SourceEntryId): IngestStatus {
     return this.statusByEntry.get(entryId) ?? { status: "none" };
   }
+
+  listStatuses(): Array<{ sourceEntryId: SourceEntryId; status: IngestStatus }> {
+    return Array.from(this.statusByEntry.entries()).map(([sourceEntryId, status]) => ({
+      sourceEntryId,
+      status
+    }));
+  }
+
+  setStatus(sourceEntryId: SourceEntryId, status: IngestStatus): void {
+    this.statusByEntry.set(sourceEntryId, status);
+  }
 }
 
 export class MediaMetadataStore {
@@ -173,6 +202,17 @@ export class MediaMetadataStore {
 
   get(mediaId: MediaId): MediaMetadata | undefined {
     return this.metadataByMediaId.get(mediaId);
+  }
+
+  list(): Array<{ mediaId: MediaId; metadata: MediaMetadata }> {
+    return Array.from(this.metadataByMediaId.entries()).map(([mediaId, metadata]) => ({
+      mediaId,
+      metadata
+    }));
+  }
+
+  set(mediaId: MediaId, metadata: MediaMetadata): void {
+    this.metadataByMediaId.set(mediaId, metadata);
   }
 }
 
