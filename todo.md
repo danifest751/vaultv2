@@ -45,3 +45,18 @@
 - [x] Добавить эндпоинты Sources (CRUD)
 - [x] Добавить эндпоинты jobs (scan enqueue + list)
 - [x] Проверить build/test
+
+## 2026-02-15 — API для media и entries + персистентность jobs
+
+### Подзадачи
+- [x] Восстанавливать JobStore из WAL при старте
+- [x] Добавить эндпоинт sources/:id/entries
+- [x] Добавить эндпоинты media list/view
+- [x] Проверить build/test
+
+## 2026-02-15 — API для Quarantine
+
+### Подзадачи
+- [x] Добавить эндпоинты quarantine list/view
+- [x] Добавить эндпоинты quarantine accept/reject через jobs
+- [x] Проверить build/test

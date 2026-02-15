@@ -5,6 +5,8 @@ import {
   DomainEvent,
   JsonObject,
   Source,
+  asMediaId,
+  asQuarantineItemId,
   asSourceId,
   newSourceId
 } from "@family-media-vault/core";
@@ -13,6 +15,7 @@ import {
   VaultLayout,
   WalWriter,
   ensureDir,
+  readWalRecords,
   rebuildDomainState
 } from "@family-media-vault/storage";
 import {
@@ -21,7 +24,10 @@ import {
   createIngestJobHandler,
   createMetadataJobHandler,
   createProbableDedupJobHandler,
-  createScanJobHandler
+  createScanJobHandler,
+  createQuarantineAcceptJobHandler,
+  createQuarantineRejectJobHandler,
+  rebuildJobStore
 } from "@family-media-vault/jobs";
 
 const port = Number(process.env.PORT ?? 3000);
@@ -60,13 +66,21 @@ async function main(): Promise<void> {
 
   const state = await rebuildDomainState({ walDir, snapshotsDir, hmacSecret });
   const writer = await WalWriter.create({ walDir, hmacSecret, fsync: true });
-  const jobStore = new JobStore();
+
+  const jobStore = await rebuildJobStore(
+    (async function* () {
+      for await (const record of readWalRecords({ walDir, hmacSecret })) {
+        yield record.event;
+      }
+    })()
+  );
   const jobEngine = new JobEngine({
     store: jobStore,
     eventWriter: {
       append: async (event: DomainEvent) => {
         await writer.append(event);
         state.applyEvent(event);
+        jobStore.applyEvent(event);
       }
     },
     concurrency: 2
@@ -75,6 +89,7 @@ async function main(): Promise<void> {
   const appendEvent = async (event: ReturnType<typeof createEvent>) => {
     await writer.append(event as DomainEvent);
     state.applyEvent(event as DomainEvent);
+    jobStore.applyEvent(event as DomainEvent);
   };
 
   const vault: VaultLayout = { root: vaultDir };
@@ -114,25 +129,42 @@ async function main(): Promise<void> {
     })
   });
 
+  jobEngine.register({
+    kind: "quarantine:accept",
+    handler: createQuarantineAcceptJobHandler({
+      state,
+      appendEvent
+    })
+  });
+
+  jobEngine.register({
+    kind: "quarantine:reject",
+    handler: createQuarantineRejectJobHandler({
+      state,
+      appendEvent
+    })
+  });
+
   jobEngine.resumePending();
 
   const server = http.createServer(async (req, res) => {
     const method = req.method ?? "GET";
     const url = req.url ?? "/";
     const fullUrl = new URL(url, `http://${req.headers.host ?? "localhost"}`);
+    const parts = fullUrl.pathname.split("/").filter(Boolean);
 
     try {
-      if (method === "GET" && fullUrl.pathname === "/health") {
+      if (method === "GET" && parts.length === 1 && parts[0] === "health") {
         sendJson(res, 200, { status: "ok" });
         return;
       }
 
-      if (method === "GET" && fullUrl.pathname === "/sources") {
+      if (method === "GET" && parts.length === 1 && parts[0] === "sources") {
         sendJson(res, 200, { sources: state.sources.listSources() });
         return;
       }
 
-      if (method === "POST" && fullUrl.pathname === "/sources") {
+      if (method === "POST" && parts.length === 1 && parts[0] === "sources") {
         const body = await readJson(req);
         const sourcePath = typeof body.path === "string" ? body.path : "";
         if (!sourcePath) {
@@ -155,8 +187,19 @@ async function main(): Promise<void> {
         return;
       }
 
-      if (method === "PATCH" && fullUrl.pathname.startsWith("/sources/")) {
-        const sourceId = asSourceId(fullUrl.pathname.split("/")[2] ?? "");
+      if (method === "GET" && parts.length === 3 && parts[0] === "sources" && parts[2] === "entries") {
+        const sourceId = asSourceId(parts[1] ?? "");
+        const source = state.sources.getSource(sourceId);
+        if (!source) {
+          sendJson(res, 404, { error: "source_not_found" });
+          return;
+        }
+        sendJson(res, 200, { entries: state.sources.listEntriesForSource(sourceId) });
+        return;
+      }
+
+      if (method === "PATCH" && parts.length === 2 && parts[0] === "sources") {
+        const sourceId = asSourceId(parts[1] ?? "");
         const existing = state.sources.getSource(sourceId);
         if (!existing) {
           sendJson(res, 404, { error: "source_not_found" });
@@ -182,8 +225,8 @@ async function main(): Promise<void> {
         return;
       }
 
-      if (method === "DELETE" && fullUrl.pathname.startsWith("/sources/")) {
-        const sourceId = asSourceId(fullUrl.pathname.split("/")[2] ?? "");
+      if (method === "DELETE" && parts.length === 2 && parts[0] === "sources") {
+        const sourceId = asSourceId(parts[1] ?? "");
         const existing = state.sources.getSource(sourceId);
         if (!existing) {
           sendJson(res, 404, { error: "source_not_found" });
@@ -194,12 +237,28 @@ async function main(): Promise<void> {
         return;
       }
 
-      if (method === "GET" && fullUrl.pathname === "/jobs") {
+      if (method === "GET" && parts.length === 1 && parts[0] === "media") {
+        sendJson(res, 200, { media: state.media.list() });
+        return;
+      }
+
+      if (method === "GET" && parts.length === 2 && parts[0] === "media") {
+        const mediaId = asMediaId(parts[1] ?? "");
+        const media = state.media.get(mediaId);
+        if (!media) {
+          sendJson(res, 404, { error: "media_not_found" });
+          return;
+        }
+        sendJson(res, 200, { media, metadata: state.metadata.get(mediaId) });
+        return;
+      }
+
+      if (method === "GET" && parts.length === 1 && parts[0] === "jobs") {
         sendJson(res, 200, { jobs: jobStore.list() });
         return;
       }
 
-      if (method === "POST" && fullUrl.pathname === "/jobs/scan") {
+      if (method === "POST" && parts.length === 2 && parts[0] === "jobs" && parts[1] === "scan") {
         const body = await readJson(req);
         const sourceIdRaw = typeof body.sourceId === "string" ? body.sourceId : "";
         if (!sourceIdRaw) {
@@ -213,6 +272,67 @@ async function main(): Promise<void> {
           return;
         }
         const jobId = await jobEngine.enqueue("scan:source", { sourceId });
+        sendJson(res, 202, { jobId });
+        return;
+      }
+
+      if (method === "GET" && parts.length === 1 && parts[0] === "quarantine") {
+        const status = fullUrl.searchParams.get("status");
+        const items = state.quarantine.list();
+        const filtered =
+          status === "pending" || status === "accepted" || status === "rejected"
+            ? items.filter((item) => item.status === status)
+            : items;
+        sendJson(res, 200, { items: filtered });
+        return;
+      }
+
+      if (method === "GET" && parts.length === 2 && parts[0] === "quarantine") {
+        const quarantineId = asQuarantineItemId(parts[1] ?? "");
+        const item = state.quarantine.get(quarantineId);
+        if (!item) {
+          sendJson(res, 404, { error: "quarantine_not_found" });
+          return;
+        }
+        sendJson(res, 200, { item });
+        return;
+      }
+
+      if (
+        method === "POST" &&
+        parts.length === 3 &&
+        parts[0] === "quarantine" &&
+        (parts[2] === "accept" || parts[2] === "reject")
+      ) {
+        const quarantineId = asQuarantineItemId(parts[1] ?? "");
+        const item = state.quarantine.get(quarantineId);
+        if (!item) {
+          sendJson(res, 404, { error: "quarantine_not_found" });
+          return;
+        }
+
+        const body = await readJson(req);
+        if (parts[2] === "accept") {
+          const acceptedMediaId =
+            typeof body.acceptedMediaId === "string" ? body.acceptedMediaId : "";
+          if (!acceptedMediaId) {
+            sendJson(res, 400, { error: "acceptedMediaId_required" });
+            return;
+          }
+          const jobId = await jobEngine.enqueue("quarantine:accept", {
+            quarantineId: String(quarantineId),
+            acceptedMediaId
+          });
+          sendJson(res, 202, { jobId });
+          return;
+        }
+
+        const reason = typeof body.reason === "string" ? body.reason : undefined;
+        const payload: JsonObject = { quarantineId: String(quarantineId) };
+        if (reason) {
+          payload.reason = reason;
+        }
+        const jobId = await jobEngine.enqueue("quarantine:reject", payload);
         sendJson(res, 202, { jobId });
         return;
       }
