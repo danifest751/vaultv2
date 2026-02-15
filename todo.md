@@ -79,3 +79,9 @@
 ### Подзадачи
 - [x] Добавить эндпоинты snapshots create/pointer
 - [x] Проверить build/test
+
+## 2026-02-15 — Минимальный viewer
+
+### Подзадачи
+- [x] Добавить HTML viewer на /ui
+- [x] Проверить build/test

@@ -65,6 +65,14 @@ function sendJson(res: ServerResponse, status: number, payload: unknown): void {
   res.end(body);
 }
 
+function sendHtml(res: ServerResponse, status: number, html: string): void {
+  res.writeHead(status, {
+    "content-type": "text/html; charset=utf-8",
+    "content-length": Buffer.byteLength(html)
+  });
+  res.end(html);
+}
+
 async function main(): Promise<void> {
   await ensureDir(walDir);
   await ensureDir(snapshotsDir);
@@ -165,6 +173,154 @@ async function main(): Promise<void> {
     const parts = fullUrl.pathname.split("/").filter(Boolean);
 
     try {
+      if (method === "GET" && parts.length === 1 && parts[0] === "ui") {
+        sendHtml(
+          res,
+          200,
+          `<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Family Media Vault</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 24px; background: #0f1115; color: #e5e7eb; }
+      header { display: flex; align-items: baseline; gap: 16px; margin-bottom: 16px; }
+      h1 { font-size: 20px; margin: 0; }
+      .muted { color: #9ca3af; font-size: 13px; }
+      .layout { display: grid; grid-template-columns: 320px 1fr; gap: 16px; }
+      .panel { background: #161a22; border: 1px solid #1f2937; border-radius: 10px; padding: 12px; }
+      .list { display: flex; flex-direction: column; gap: 8px; max-height: 70vh; overflow: auto; }
+      .item { border: 1px solid #1f2937; border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 6px; cursor: pointer; }
+      .item:hover { border-color: #374151; }
+      .id { font-size: 12px; color: #93c5fd; word-break: break-all; }
+      .meta { font-size: 12px; color: #9ca3af; }
+      .actions { display: flex; gap: 8px; }
+      button { background: #2563eb; border: none; color: white; padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+      button.secondary { background: #374151; }
+      .preview { display: flex; flex-direction: column; gap: 12px; }
+      .preview img, .preview video { max-width: 100%; border-radius: 8px; background: #0b0d12; }
+      .kv { display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px; font-size: 13px; }
+      .kv div { word-break: break-all; }
+      .empty { color: #9ca3af; font-size: 13px; padding: 8px; text-align: center; }
+      a { color: #93c5fd; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Family Media Vault</h1>
+      <span class="muted">Минимальный viewer для /media</span>
+    </header>
+    <div class="layout">
+      <section class="panel">
+        <div class="actions">
+          <button id="reload">Обновить</button>
+        </div>
+        <div id="list" class="list" aria-live="polite"></div>
+      </section>
+      <section class="panel preview">
+        <div id="details" class="kv"></div>
+        <div id="media"></div>
+      </section>
+    </div>
+    <script>
+      const listEl = document.getElementById("list");
+      const detailsEl = document.getElementById("details");
+      const mediaEl = document.getElementById("media");
+      const reloadBtn = document.getElementById("reload");
+
+      const fmtBytes = (value) => {
+        if (!Number.isFinite(value)) return "-";
+        if (value < 1024) return value + " B";
+        const units = ["KB","MB","GB","TB"];
+        let idx = -1;
+        let size = value;
+        while (size >= 1024 && idx < units.length - 1) {
+          size /= 1024;
+          idx++;
+        }
+        return size.toFixed(1) + " " + units[idx];
+      };
+
+      const renderEmpty = () => {
+        listEl.innerHTML = "<div class=\\"empty\\">Нет данных. Добавьте source и запустите scan.</div>";
+      };
+
+      const renderDetails = (data) => {
+        if (!data || !data.media) {
+          detailsEl.innerHTML = "";
+          mediaEl.innerHTML = "";
+          return;
+        }
+        const { media, metadata } = data;
+        detailsEl.innerHTML = [
+          ["mediaId", media.mediaId],
+          ["sha256", media.sha256],
+          ["size", fmtBytes(media.size)],
+          ["sourceEntryId", media.sourceEntryId],
+          ["kind", metadata?.kind ?? "-"],
+          ["mimeType", metadata?.mimeType ?? "-"],
+          ["width", metadata?.width ?? "-"],
+          ["height", metadata?.height ?? "-"],
+          ["durationMs", metadata?.durationMs ?? "-"],
+          ["takenAt", metadata?.takenAt ? new Date(metadata.takenAt).toISOString() : "-"]
+        ].map(([k,v]) => "<div class=\\"meta\\">" + k + "</div><div>" + v + "</div>").join("");
+        const fileUrl = "/media/" + media.mediaId + "/file";
+        const mime = metadata?.mimeType ?? "";
+        if (mime.startsWith("image/")) {
+          mediaEl.innerHTML = "<img src=\\"" + fileUrl + "\\" alt=\\"preview\\" />";
+        } else if (mime.startsWith("video/")) {
+          mediaEl.innerHTML = "<video src=\\"" + fileUrl + "\\" controls></video>";
+        } else {
+          mediaEl.innerHTML = "<a href=\\"" + fileUrl + "\\" target=\\"_blank\\">Скачать файл</a>";
+        }
+      };
+
+      const loadMedia = async () => {
+        listEl.innerHTML = "<div class=\\"empty\\">Загрузка...</div>";
+        detailsEl.innerHTML = "";
+        mediaEl.innerHTML = "";
+        const res = await fetch("/media");
+        if (!res.ok) {
+          listEl.innerHTML = "<div class=\\"empty\\">Ошибка загрузки списка</div>";
+          return;
+        }
+        const data = await res.json();
+        const items = data.media ?? [];
+        if (items.length === 0) {
+          renderEmpty();
+          return;
+        }
+        listEl.innerHTML = "";
+        items.forEach((item) => {
+          const card = document.createElement("div");
+          card.className = "item";
+          card.innerHTML = "<div class=\\"id\\">" + item.mediaId + "</div>" +
+            "<div class=\\"meta\\">" + fmtBytes(item.size) + "</div>" +
+            "<div class=\\"meta\\">" + item.sha256 + "</div>";
+          card.addEventListener("click", async () => {
+            const resp = await fetch("/media/" + item.mediaId);
+            if (!resp.ok) {
+              renderDetails(null);
+              return;
+            }
+            const details = await resp.json();
+            renderDetails(details);
+          });
+          listEl.appendChild(card);
+        });
+      };
+
+      reloadBtn.addEventListener("click", loadMedia);
+      loadMedia();
+    </script>
+  </body>
+</html>`
+        );
+        return;
+      }
+
       if (method === "GET" && parts.length === 1 && parts[0] === "health") {
         sendJson(res, 200, { status: "ok" });
         return;
