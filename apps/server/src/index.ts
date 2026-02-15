@@ -7,6 +7,7 @@ import {
   Source,
   asMediaId,
   asQuarantineItemId,
+  asSourceEntryId,
   asSourceId,
   newSourceId
 } from "@family-media-vault/core";
@@ -198,6 +199,49 @@ async function main(): Promise<void> {
         return;
       }
 
+      if (method === "GET" && parts.length === 1 && parts[0] === "entries") {
+        const sourceIdRaw = fullUrl.searchParams.get("sourceId");
+        if (sourceIdRaw) {
+          const sourceId = asSourceId(sourceIdRaw);
+          const source = state.sources.getSource(sourceId);
+          if (!source) {
+            sendJson(res, 404, { error: "source_not_found" });
+            return;
+          }
+          sendJson(res, 200, { entries: state.sources.listEntriesForSource(sourceId) });
+          return;
+        }
+        sendJson(res, 200, { entries: state.sources.listEntries() });
+        return;
+      }
+
+      if (method === "GET" && parts.length === 2 && parts[0] === "entries") {
+        const entryId = asSourceEntryId(parts[1] ?? "");
+        const entry = state.sources.getEntry(entryId);
+        if (!entry) {
+          sendJson(res, 404, { error: "entry_not_found" });
+          return;
+        }
+
+        const ingest = state.ingest.getStatus(entryId);
+        const media = state.media.getBySourceEntryId(entryId);
+        const metadata = media ? state.metadata.get(media.mediaId) : undefined;
+        const quarantine = state.quarantine.getBySourceEntryId(entryId);
+        const duplicateLinks = state.duplicateLinks
+          .list()
+          .filter((link) => link.sourceEntryId === entryId);
+
+        sendJson(res, 200, {
+          entry,
+          ingest,
+          media,
+          metadata,
+          quarantine,
+          duplicateLinks
+        });
+        return;
+      }
+
       if (method === "PATCH" && parts.length === 2 && parts[0] === "sources") {
         const sourceId = asSourceId(parts[1] ?? "");
         const existing = state.sources.getSource(sourceId);
@@ -249,7 +293,35 @@ async function main(): Promise<void> {
           sendJson(res, 404, { error: "media_not_found" });
           return;
         }
-        sendJson(res, 200, { media, metadata: state.metadata.get(mediaId) });
+        const duplicateLinks = state.duplicateLinks.list().filter((link) => link.mediaId === mediaId);
+        sendJson(res, 200, { media, metadata: state.metadata.get(mediaId), duplicateLinks });
+        return;
+      }
+
+      if (method === "GET" && parts.length === 1 && parts[0] === "duplicate-links") {
+        const level = fullUrl.searchParams.get("level");
+        const mediaIdRaw = fullUrl.searchParams.get("mediaId");
+        const sourceEntryIdRaw = fullUrl.searchParams.get("sourceEntryId");
+
+        const normalizedLevel =
+          level === "exact" || level === "strong" || level === "probable" ? level : null;
+        const mediaId = mediaIdRaw ? asMediaId(mediaIdRaw) : null;
+        const sourceEntryId = sourceEntryIdRaw ? asSourceEntryId(sourceEntryIdRaw) : null;
+
+        const links = state.duplicateLinks.list().filter((link) => {
+          if (normalizedLevel && link.level !== normalizedLevel) {
+            return false;
+          }
+          if (mediaId && link.mediaId !== mediaId) {
+            return false;
+          }
+          if (sourceEntryId && link.sourceEntryId !== sourceEntryId) {
+            return false;
+          }
+          return true;
+        });
+
+        sendJson(res, 200, { links });
         return;
       }
 

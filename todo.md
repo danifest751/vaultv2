@@ -60,3 +60,10 @@
 - [x] Добавить эндпоинты quarantine list/view
 - [x] Добавить эндпоинты quarantine accept/reject через jobs
 - [x] Проверить build/test
+
+## 2026-02-15 — API для duplicate links и entry status
+
+### Подзадачи
+- [x] Добавить эндпоинты duplicate-links list с фильтрами
+- [x] Добавить эндпоинты entries list и entry status view
+- [x] Проверить build/test
