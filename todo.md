@@ -73,3 +73,9 @@
 ### Подзадачи
 - [x] Добавить эндпоинт media/:id/file
 - [x] Проверить build/test
+
+## 2026-02-15 — Снапшоты runtime
+
+### Подзадачи
+- [x] Добавить эндпоинты snapshots create/pointer
+- [x] Проверить build/test

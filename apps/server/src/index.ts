@@ -18,8 +18,11 @@ import {
   WalWriter,
   ensureDir,
   mediaPathForSha256,
+  readSnapshotPointer,
   readWalRecords,
-  rebuildDomainState
+  rebuildDomainState,
+  snapshotDomainState,
+  writeSnapshot
 } from "@family-media-vault/storage";
 import {
   JobEngine,
@@ -67,12 +70,15 @@ async function main(): Promise<void> {
   await ensureDir(snapshotsDir);
   await ensureDir(vaultDir);
 
+  let lastWalSeq = 0;
+
   const state = await rebuildDomainState({ walDir, snapshotsDir, hmacSecret });
   const writer = await WalWriter.create({ walDir, hmacSecret, fsync: true });
 
   const jobStore = await rebuildJobStore(
     (async function* () {
       for await (const record of readWalRecords({ walDir, hmacSecret })) {
+        lastWalSeq = record.seq;
         yield record.event;
       }
     })()
@@ -81,7 +87,8 @@ async function main(): Promise<void> {
     store: jobStore,
     eventWriter: {
       append: async (event: DomainEvent) => {
-        await writer.append(event);
+        const record = await writer.append(event);
+        lastWalSeq = record.seq;
         state.applyEvent(event);
         jobStore.applyEvent(event);
       }
@@ -90,7 +97,8 @@ async function main(): Promise<void> {
   });
 
   const appendEvent = async (event: ReturnType<typeof createEvent>) => {
-    await writer.append(event as DomainEvent);
+    const record = await writer.append(event as DomainEvent);
+    lastWalSeq = record.seq;
     state.applyEvent(event as DomainEvent);
     jobStore.applyEvent(event as DomainEvent);
   };
@@ -375,6 +383,26 @@ async function main(): Promise<void> {
         }
         const jobId = await jobEngine.enqueue("scan:source", { sourceId });
         sendJson(res, 202, { jobId });
+        return;
+      }
+
+      if (method === "GET" && parts.length === 2 && parts[0] === "snapshots" && parts[1] === "pointer") {
+        try {
+          const pointer = await readSnapshotPointer(snapshotsDir);
+          sendJson(res, 200, { pointer });
+        } catch {
+          sendJson(res, 404, { error: "snapshot_pointer_not_found" });
+        }
+        return;
+      }
+
+      if (method === "POST" && parts.length === 1 && parts[0] === "snapshots") {
+        const pointer = await writeSnapshot({
+          snapshotsDir,
+          walSeq: lastWalSeq,
+          records: snapshotDomainState(state)
+        });
+        sendJson(res, 201, { pointer });
         return;
       }
 
