@@ -17,6 +17,7 @@ export interface IngestHandlerOptions {
   state: DomainState;
   appendEvent: (event: ReturnType<typeof createEvent>) => Promise<void>;
   vault: VaultLayout;
+  jobEngine: { enqueue: (kind: string, payload?: JsonObject) => Promise<unknown> };
 }
 
 export function createIngestJobHandler(options: IngestHandlerOptions) {
@@ -80,5 +81,10 @@ export function createIngestJobHandler(options: IngestHandlerOptions) {
     };
 
     await options.appendEvent(createEvent("MEDIA_IMPORTED", { media }));
+
+    await options.jobEngine.enqueue("metadata:extract", {
+      mediaId: media.mediaId,
+      sourceEntryId: entryId
+    });
   };
 }

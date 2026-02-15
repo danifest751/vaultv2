@@ -1,11 +1,12 @@
 import {
   DomainEvent,
   Media,
+  MediaId,
+  MediaMetadata,
   Source,
   SourceEntry,
   SourceEntryId,
-  SourceId,
-  MediaId
+  SourceId
 } from "@family-media-vault/core";
 
 export class SourceStore {
@@ -157,14 +158,34 @@ export class IngestStore {
   }
 }
 
+export class MediaMetadataStore {
+  private readonly metadataByMediaId = new Map<MediaId, MediaMetadata>();
+
+  applyEvent(event: DomainEvent): void {
+    switch (event.type) {
+      case "MEDIA_METADATA_EXTRACTED":
+        this.metadataByMediaId.set(event.payload.mediaId, event.payload.metadata);
+        return;
+      default:
+        return;
+    }
+  }
+
+  get(mediaId: MediaId): MediaMetadata | undefined {
+    return this.metadataByMediaId.get(mediaId);
+  }
+}
+
 export class DomainState {
   readonly sources = new SourceStore();
   readonly media = new MediaStore();
   readonly ingest = new IngestStore();
+  readonly metadata = new MediaMetadataStore();
 
   applyEvent(event: DomainEvent): void {
     this.sources.applyEvent(event);
     this.media.applyEvent(event);
     this.ingest.applyEvent(event);
+    this.metadata.applyEvent(event);
   }
 }

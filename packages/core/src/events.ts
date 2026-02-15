@@ -17,6 +17,19 @@ export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 export type JsonObject = { [key: string]: JsonValue };
 
+export type MediaKind = "photo" | "video" | "unknown";
+
+export interface MediaMetadata {
+  kind: MediaKind;
+  takenAt?: TimestampMs;
+  width?: number;
+  height?: number;
+  durationMs?: number;
+  cameraModel?: string;
+  mimeType?: string;
+  raw?: JsonObject;
+}
+
 export type SourceEntryKind = "file" | "archive_entry";
 export type SourceEntryState = "active" | "missing" | "deleted";
 
@@ -79,6 +92,7 @@ export type EventType =
   | "SOURCE_ENTRY_MARKED_MISSING"
   | "MEDIA_SHA256_COMPUTED"
   | "MEDIA_IMPORTED"
+  | "MEDIA_METADATA_EXTRACTED"
   | "MEDIA_SKIPPED_DUPLICATE_EXACT"
   | "DUPLICATE_LINK_CREATED"
   | "QUARANTINE_CREATED"
@@ -99,6 +113,11 @@ export type EventPayloads = {
   };
   MEDIA_SHA256_COMPUTED: { sourceEntryId: SourceEntryId; sha256: string; size: number };
   MEDIA_IMPORTED: { media: Media };
+  MEDIA_METADATA_EXTRACTED: {
+    mediaId: MediaId;
+    sourceEntryId: SourceEntryId;
+    metadata: MediaMetadata;
+  };
   MEDIA_SKIPPED_DUPLICATE_EXACT: { sourceEntryId: SourceEntryId; existingMediaId: MediaId };
   DUPLICATE_LINK_CREATED: { link: DuplicateLink };
   QUARANTINE_CREATED: { item: QuarantineItem };

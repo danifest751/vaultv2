@@ -15,6 +15,7 @@ import {
 import { JobEngine } from "../job-engine";
 import { JobStore } from "../job-store";
 import { createIngestJobHandler } from "../ingest";
+import { createMetadataJobHandler } from "../metadata";
 import { createScanJobHandler } from "../scan";
 
 const HMAC_SECRET = "scan-secret";
@@ -62,7 +63,16 @@ describe("scan + ingest stage A/B", () => {
       handler: createIngestJobHandler({
         state,
         appendEvent,
-        vault
+        vault,
+        jobEngine
+      })
+    });
+
+    jobEngine.register({
+      kind: "metadata:extract",
+      handler: createMetadataJobHandler({
+        state,
+        appendEvent
       })
     });
 
@@ -85,6 +95,8 @@ describe("scan + ingest stage A/B", () => {
 
     const mediaAfterFirst = state.media.list();
     expect(mediaAfterFirst).toHaveLength(2);
+    const meta = state.metadata.get(mediaAfterFirst[0].mediaId);
+    expect(meta?.kind).toBe("photo");
 
     const eventsFirst: string[] = [];
     for await (const record of readWalRecords({ walDir, hmacSecret: HMAC_SECRET })) {
@@ -151,7 +163,16 @@ describe("scan + ingest stage A/B", () => {
       handler: createIngestJobHandler({
         state,
         appendEvent,
-        vault
+        vault,
+        jobEngine
+      })
+    });
+
+    jobEngine.register({
+      kind: "metadata:extract",
+      handler: createMetadataJobHandler({
+        state,
+        appendEvent
       })
     });
 
@@ -173,6 +194,9 @@ describe("scan + ingest stage A/B", () => {
     await jobEngine.runUntilIdle();
 
     expect(state.media.list()).toHaveLength(1);
+    const onlyMedia = state.media.list()[0];
+    const metadata = state.metadata.get(onlyMedia.mediaId);
+    expect(metadata?.kind).toBe("photo");
 
     const events: string[] = [];
     for await (const record of readWalRecords({ walDir, hmacSecret: HMAC_SECRET })) {
