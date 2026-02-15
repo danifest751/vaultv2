@@ -329,6 +329,30 @@ export class QuarantineStore {
         this.byEntryId.set(event.payload.item.sourceEntryId, event.payload.item.quarantineId);
         return;
       }
+      case "QUARANTINE_ACCEPTED": {
+        const item = this.items.get(event.payload.quarantineId);
+        if (!item || item.status !== "pending") {
+          return;
+        }
+        item.status = "accepted";
+        item.resolvedAt = event.payload.resolvedAt;
+        item.acceptedMediaId = event.payload.acceptedMediaId;
+        item.rejectedReason = undefined;
+        this.items.set(item.quarantineId, item);
+        return;
+      }
+      case "QUARANTINE_REJECTED": {
+        const item = this.items.get(event.payload.quarantineId);
+        if (!item || item.status !== "pending") {
+          return;
+        }
+        item.status = "rejected";
+        item.resolvedAt = event.payload.resolvedAt;
+        item.rejectedReason = event.payload.reason;
+        item.acceptedMediaId = undefined;
+        this.items.set(item.quarantineId, item);
+        return;
+      }
       default:
         return;
     }

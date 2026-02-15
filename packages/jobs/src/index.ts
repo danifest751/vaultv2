@@ -4,3 +4,4 @@ export * from "./scan";
 export * from "./ingest";
 export * from "./metadata";
 export * from "./dedup";
+export * from "./quarantine";

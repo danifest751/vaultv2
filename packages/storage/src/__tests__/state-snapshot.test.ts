@@ -4,7 +4,9 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   createEvent,
+  newDuplicateLinkId,
   newMediaId,
+  newQuarantineItemId,
   newSourceEntryId,
   newSourceId
 } from "@family-media-vault/core";
@@ -26,6 +28,8 @@ describe("state snapshot", () => {
     const entryIdA = newSourceEntryId();
     const entryIdB = newSourceEntryId();
     const mediaId = newMediaId();
+    const quarantineId = newQuarantineItemId();
+    const duplicateLinkId = newDuplicateLinkId();
 
     const sourceCreated = createEvent("SOURCE_CREATED", {
       source: {
@@ -91,7 +95,44 @@ describe("state snapshot", () => {
       }
     });
 
-    for (const event of [sourceCreated, entryA, entryB, mediaImported, duplicateExact, metadataExtracted]) {
+    const quarantineCreated = createEvent("QUARANTINE_CREATED", {
+      item: {
+        quarantineId,
+        sourceEntryId: entryIdB,
+        candidateMediaIds: [mediaId],
+        status: "pending",
+        createdAt: 4
+      }
+    });
+
+    const quarantineAccepted = createEvent("QUARANTINE_ACCEPTED", {
+      quarantineId,
+      acceptedMediaId: mediaId,
+      resolvedAt: 5
+    });
+
+    const duplicateLinkCreated = createEvent("DUPLICATE_LINK_CREATED", {
+      link: {
+        duplicateLinkId,
+        mediaId,
+        sourceEntryId: entryIdB,
+        level: "probable",
+        createdAt: 5,
+        reason: "quarantine-accepted"
+      }
+    });
+
+    for (const event of [
+      sourceCreated,
+      entryA,
+      entryB,
+      mediaImported,
+      duplicateExact,
+      metadataExtracted,
+      quarantineCreated,
+      quarantineAccepted,
+      duplicateLinkCreated
+    ]) {
       state.applyEvent(event);
     }
 
@@ -116,5 +157,10 @@ describe("state snapshot", () => {
       mimeType: "image/jpeg",
       raw: { ext: ".jpg" }
     });
+    const rebuiltQuarantine = rebuilt.quarantine.get(quarantineId);
+    expect(rebuiltQuarantine?.status).toBe("accepted");
+    expect(rebuiltQuarantine?.acceptedMediaId).toBe(mediaId);
+    expect(rebuiltQuarantine?.resolvedAt).toBe(5);
+    expect(rebuilt.duplicateLinks.list()).toHaveLength(1);
   });
 });

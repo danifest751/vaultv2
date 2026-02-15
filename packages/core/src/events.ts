@@ -82,6 +82,9 @@ export interface QuarantineItem {
   candidateMediaIds: MediaId[];
   status: QuarantineStatus;
   createdAt: TimestampMs;
+  resolvedAt?: TimestampMs;
+  acceptedMediaId?: MediaId;
+  rejectedReason?: string;
 }
 
 export type EventType =
@@ -96,6 +99,8 @@ export type EventType =
   | "MEDIA_SKIPPED_DUPLICATE_EXACT"
   | "DUPLICATE_LINK_CREATED"
   | "QUARANTINE_CREATED"
+  | "QUARANTINE_ACCEPTED"
+  | "QUARANTINE_REJECTED"
   | "JOB_ENQUEUED"
   | "JOB_STARTED"
   | "JOB_COMPLETED"
@@ -121,6 +126,16 @@ export type EventPayloads = {
   MEDIA_SKIPPED_DUPLICATE_EXACT: { sourceEntryId: SourceEntryId; existingMediaId: MediaId };
   DUPLICATE_LINK_CREATED: { link: DuplicateLink };
   QUARANTINE_CREATED: { item: QuarantineItem };
+  QUARANTINE_ACCEPTED: {
+    quarantineId: QuarantineItemId;
+    acceptedMediaId: MediaId;
+    resolvedAt: TimestampMs;
+  };
+  QUARANTINE_REJECTED: {
+    quarantineId: QuarantineItemId;
+    resolvedAt: TimestampMs;
+    reason?: string;
+  };
   JOB_ENQUEUED: { jobId: JobId; kind: string; payload?: JsonObject };
   JOB_STARTED: { jobId: JobId; kind: string; attempt: number };
   JOB_COMPLETED: { jobId: JobId };
