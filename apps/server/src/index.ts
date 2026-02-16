@@ -203,156 +203,252 @@ async function main(): Promise<void> {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Family Media Vault</title>
+    <title>Family Media Vault — Dev Console</title>
     <style>
       :root { color-scheme: light dark; }
-      body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 24px; background: #0f1115; color: #e5e7eb; }
-      header { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
-      h1 { font-size: 20px; margin: 0; }
-      .muted { color: #9ca3af; font-size: 13px; }
-      .layout { display: grid; grid-template-columns: 340px 1fr; gap: 16px; }
-      .panel { background: #161a22; border: 1px solid #1f2937; border-radius: 10px; padding: 12px; }
-      .progress { height: 4px; background: #0b0d12; border-radius: 999px; overflow: hidden; }
-      .progress .bar { height: 100%; width: 40%; background: #2563eb; animation: progress 1.2s infinite; }
-      .list { display: flex; flex-direction: column; gap: 8px; max-height: 70vh; overflow: auto; }
-      .item { border: 1px solid #1f2937; border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 6px; cursor: pointer; }
-      .item:hover { border-color: #374151; }
-      .id { font-size: 12px; color: #93c5fd; word-break: break-all; }
-      .meta { font-size: 12px; color: #9ca3af; }
-      .actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
-      .controls { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
-      .controls-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-      .section-title { font-size: 12px; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.08em; margin-top: 12px; }
-      .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
-      button { background: #2563eb; border: none; color: white; padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 12px; }
-      button.secondary { background: #374151; }
-      button:disabled { opacity: 0.5; cursor: not-allowed; }
-      button.tab { background: #1f2937; color: #e5e7eb; }
+      * { box-sizing: border-box; }
+      body { font-family: 'SF Mono', 'Consolas', 'Monaco', monospace; margin: 0; padding: 16px; background: #0a0d12; color: #e5e7eb; font-size: 13px; }
+      header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; padding: 12px 16px; background: #161a22; border: 1px solid #1f2937; border-radius: 8px; }
+      h1 { font-size: 18px; margin: 0; font-weight: 600; }
+      .header-right { display: flex; gap: 12px; align-items: center; }
+      .env-badge { font-size: 11px; padding: 3px 8px; border-radius: 999px; background: #dc2626; color: white; font-weight: 600; }
+      .layout { display: grid; grid-template-columns: 380px 1fr 320px; gap: 12px; }
+      .panel { background: #161a22; border: 1px solid #1f2937; border-radius: 8px; padding: 12px; overflow: hidden; }
+      .panel-title { font-size: 11px; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 10px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
+      .panel-title .live { width: 6px; height: 6px; border-radius: 50%; background: #10b981; animation: pulse 2s infinite; }
+      @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+      
+      .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+      .metric { background: #0f1318; border: 1px solid #1f2937; border-radius: 6px; padding: 10px; text-align: center; }
+      .metric-value { font-size: 24px; font-weight: 700; margin-bottom: 2px; }
+      .metric-label { font-size: 10px; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.05em; }
+      .metric.green .metric-value { color: #10b981; }
+      .metric.blue .metric-value { color: #3b82f6; }
+      .metric.yellow .metric-value { color: #f59e0b; }
+      .metric.red .metric-value { color: #ef4444; }
+      .metric.purple .metric-value { color: #a78bfa; }
+      
+      .job-queue { display: flex; flex-direction: column; gap: 6px; max-height: 240px; overflow-y: auto; }
+      .job-item { background: #0f1318; border: 1px solid #1f2937; border-radius: 5px; padding: 8px; font-size: 11px; }
+      .job-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+      .job-kind { font-weight: 600; color: #93c5fd; }
+      .job-status { font-size: 10px; padding: 2px 6px; border-radius: 3px; }
+      .job-status.queued { background: #374151; color: #e5e7eb; }
+      .job-status.running { background: #fbbf24; color: #1f2937; animation: pulse 1.5s infinite; }
+      .job-status.completed { background: #10b981; color: white; }
+      .job-status.failed { background: #ef4444; color: white; }
+      .job-meta { color: #6b7280; font-size: 10px; }
+      
+      .list { display: flex; flex-direction: column; gap: 6px; max-height: 400px; overflow-y: auto; }
+      .item { border: 1px solid #1f2937; border-radius: 6px; padding: 8px; cursor: pointer; transition: all 0.15s; }
+      .item:hover { border-color: #3b82f6; background: #0f1318; }
+      .item-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+      .item-id { font-size: 11px; color: #93c5fd; font-weight: 600; }
+      .item-badge { font-size: 10px; padding: 2px 6px; border-radius: 3px; background: #374151; color: #e5e7eb; }
+      .item-meta { font-size: 11px; color: #6b7280; }
+      
+      .tabs { display: flex; gap: 4px; margin-bottom: 10px; }
+      button { background: #2563eb; border: none; color: white; padding: 7px 12px; border-radius: 5px; cursor: pointer; font-size: 11px; font-weight: 600; transition: all 0.15s; font-family: inherit; }
+      button:hover { background: #1d4ed8; }
+      button:disabled { opacity: 0.4; cursor: not-allowed; }
+      button.tab { background: #1f2937; color: #9ca3af; }
       button.tab.active { background: #2563eb; color: white; }
-      .actions-right { display: flex; gap: 8px; align-items: center; }
-      select { background: #111827; color: #e5e7eb; border: 1px solid #374151; border-radius: 6px; padding: 6px 8px; font-size: 12px; }
-      .preview { display: flex; flex-direction: column; gap: 12px; }
-      .preview img, .preview video { max-width: 100%; border-radius: 8px; background: #0b0d12; }
-      .kv { display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px; font-size: 13px; }
-      .kv div { word-break: break-all; }
-      .empty { color: #9ca3af; font-size: 13px; padding: 8px; text-align: center; }
-      .hidden { display: none; }
-      a { color: #93c5fd; }
-      .actions-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-      .actions-row input { background: #111827; color: #e5e7eb; border: 1px solid #374151; border-radius: 6px; padding: 6px 8px; font-size: 12px; }
-      .actions-row label { font-size: 12px; color: #9ca3af; }
-      .grow { flex: 1; min-width: 220px; }
-      .status { font-size: 12px; color: #9ca3af; display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 999px; border: 1px solid #1f2937; background: #0b0d12; }
-      .status-busy { color: #fbbf24; border-color: #92400e; background: #1f140a; }
-      .status-ok { color: #34d399; border-color: #065f46; background: #0b2f24; }
-      .status-error { color: #fca5a5; border-color: #7f1d1d; background: #2a0f0f; }
-      .stats { display: flex; flex-wrap: wrap; gap: 8px; }
-      .stat { font-size: 12px; color: #cbd5f5; border: 1px solid #1f2937; border-radius: 999px; padding: 4px 10px; background: #0b0d12; }
-      .source-info { font-size: 12px; color: #9ca3af; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-      .source-card { border: 1px solid #1f2937; border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 6px; cursor: pointer; }
-      .source-card.active { border-color: #2563eb; background: #111827; }
-      .badge { font-size: 11px; color: #cbd5f5; border: 1px solid #1f2937; border-radius: 999px; padding: 2px 8px; background: #0b0d12; }
-      .source-badges { display: flex; flex-wrap: wrap; gap: 6px; }
-      @keyframes progress { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
+      button.secondary { background: #374151; }
+      button.secondary:hover { background: #4b5563; }
+      button.danger { background: #dc2626; }
+      button.danger:hover { background: #b91c1c; }
+      button.small { padding: 4px 8px; font-size: 10px; }
+      
+      .controls { display: flex; flex-direction: column; gap: 8px; }
+      .control-row { display: flex; gap: 6px; align-items: center; }
+      input, select { background: #0f1318; color: #e5e7eb; border: 1px solid #374151; border-radius: 5px; padding: 7px 10px; font-size: 11px; font-family: inherit; }
+      input.grow { flex: 1; }
+      select { cursor: pointer; }
+      
+      .source-card { border: 1px solid #1f2937; border-radius: 6px; padding: 8px; cursor: pointer; margin-bottom: 6px; transition: all 0.15s; }
+      .source-card:hover { border-color: #3b82f6; }
+      .source-card.active { border-color: #2563eb; background: #0f1318; }
+      .source-path { font-size: 11px; color: #93c5fd; font-weight: 600; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .source-id { font-size: 10px; color: #6b7280; }
+      
+      .detail-view { display: flex; flex-direction: column; gap: 12px; }
+      .detail-header { padding: 10px; background: #0f1318; border-radius: 6px; }
+      .detail-title { font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+      .detail-subtitle { font-size: 10px; color: #9ca3af; }
+      .kv { display: grid; grid-template-columns: 120px 1fr; gap: 6px 10px; font-size: 11px; padding: 10px; background: #0f1318; border-radius: 6px; }
+      .kv-key { color: #9ca3af; }
+      .kv-value { color: #e5e7eb; word-break: break-all; font-family: 'SF Mono', monospace; }
+      
+      .media-preview { background: #0f1318; border-radius: 6px; padding: 10px; text-align: center; }
+      .media-preview img, .media-preview video { max-width: 100%; border-radius: 4px; }
+      
+      .event-log { display: flex; flex-direction: column; gap: 4px; max-height: 280px; overflow-y: auto; font-size: 10px; }
+      .event-item { background: #0f1318; border-left: 2px solid #374151; padding: 6px 8px; border-radius: 3px; }
+      .event-type { color: #93c5fd; font-weight: 600; margin-bottom: 2px; }
+      .event-time { color: #6b7280; }
+      
+      .debug-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 11px; }
+      .debug-item { background: #0f1318; padding: 8px; border-radius: 5px; }
+      .debug-label { color: #9ca3af; font-size: 10px; margin-bottom: 2px; }
+      .debug-value { color: #e5e7eb; font-weight: 600; }
+      
+      .quarantine-actions { display: flex; gap: 6px; margin-top: 10px; padding: 10px; background: #0f1318; border-radius: 6px; flex-wrap: wrap; }
+      
+      .empty { color: #6b7280; text-align: center; padding: 20px; font-size: 11px; }
+      .hidden { display: none !important; }
+      a { color: #93c5fd; text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      
+      ::-webkit-scrollbar { width: 8px; height: 8px; }
+      ::-webkit-scrollbar-track { background: #0f1318; border-radius: 4px; }
+      ::-webkit-scrollbar-thumb { background: #374151; border-radius: 4px; }
+      ::-webkit-scrollbar-thumb:hover { background: #4b5563; }
     </style>
   </head>
   <body>
     <header>
-      <h1>Family Media Vault</h1>
-      <span class="muted">Viewer: media, quarantine, duplicate links</span>
+      <h1>🗄️ Family Media Vault — Dev Console</h1>
+      <div class="header-right">
+        <span class="env-badge">DEVELOPMENT</span>
+        <button id="refresh-all" class="secondary small">↻ Refresh All</button>
+      </div>
     </header>
+    
+    <div class="metrics">
+      <div class="metric green">
+        <div class="metric-value" id="metric-sources">0</div>
+        <div class="metric-label">Sources</div>
+      </div>
+      <div class="metric blue">
+        <div class="metric-value" id="metric-media">0</div>
+        <div class="metric-label">Media</div>
+      </div>
+      <div class="metric blue">
+        <div class="metric-value" id="metric-entries">0</div>
+        <div class="metric-label">Entries</div>
+      </div>
+      <div class="metric yellow">
+        <div class="metric-value" id="metric-quarantine">0</div>
+        <div class="metric-label">Quarantine</div>
+      </div>
+      <div class="metric purple">
+        <div class="metric-value" id="metric-duplicates">0</div>
+        <div class="metric-label">Duplicates</div>
+      </div>
+      <div class="metric red">
+        <div class="metric-value" id="metric-jobs">0</div>
+        <div class="metric-label">Active Jobs</div>
+      </div>
+    </div>
+    
     <div class="layout">
+      <!-- Left: Sources & Controls -->
       <section class="panel">
-        <div id="progress" class="progress hidden"><div class="bar"></div></div>
-        <div class="actions">
-          <div class="tabs">
-            <button id="tab-media" class="tab active">Media</button>
-            <button id="tab-quarantine" class="tab">Quarantine</button>
-            <button id="tab-duplicates" class="tab">Duplicate links</button>
-          </div>
-          <div class="actions-right">
-            <select id="quarantine-filter" class="hidden">
-              <option value="">Все</option>
-              <option value="pending">Ожидает</option>
-              <option value="accepted">Принято</option>
-              <option value="rejected">Отклонено</option>
-            </select>
-            <button id="reload" class="secondary">Обновить</button>
-          </div>
-        </div>
-        <div class="section-title">Sources</div>
+        <div class="panel-title">📁 Sources</div>
         <div class="controls">
-          <div class="controls-row">
-            <input id="source-path" class="grow" placeholder="Путь к папке с медиа" />
-            <button id="source-browse">Выбрать папку</button>
-            <button id="source-add" class="secondary">Добавить source</button>
+          <div class="control-row">
+            <input id="source-path" class="grow" placeholder="Path to media folder" />
+            <button id="source-browse">📂</button>
           </div>
-          <div class="controls-row">
-            <button id="source-scan" class="secondary">Scan выбранный</button>
-            <button id="source-refresh" class="secondary">Обновить sources</button>
-            <button id="snapshot-create" class="secondary">Snapshot</button>
-            <span id="source-status" class="status hidden"></span>
+          <div class="control-row">
+            <button id="source-add" class="secondary">+ Add Source</button>
+            <button id="source-scan" disabled>▶ Scan</button>
+            <button id="snapshot-create" class="secondary">💾</button>
           </div>
-          <div id="source-details" class="source-info"></div>
-          <div id="stats" class="stats"></div>
         </div>
-        <div id="sources-list" class="list" aria-live="polite"></div>
-        <div class="section-title">Media / Quarantine / Duplicates</div>
-        <div id="list" class="list" aria-live="polite"></div>
+        <div id="sources-list"></div>
+        
+        <div class="panel-title" style="margin-top: 16px;">
+          ⚙️ Job Queue
+          <div class="live" id="job-live"></div>
+        </div>
+        <div id="job-queue" class="job-queue"></div>
       </section>
-      <section class="panel preview">
-        <div id="details-title" class="muted"></div>
-        <div id="details-subtitle" class="meta"></div>
-        <div id="details" class="kv"></div>
-        <div id="quarantine-actions" class="actions-row hidden">
-          <label>Принять:</label>
-          <select id="quarantine-accept"></select>
-          <button id="quarantine-accept-btn">Accept</button>
-          <label>Отклонить:</label>
-          <input id="quarantine-reason" placeholder="Причина" />
-          <button id="quarantine-reject-btn" class="secondary">Reject</button>
+      
+      <!-- Center: Data View -->
+      <section class="panel">
+        <div class="tabs">
+          <button id="tab-media" class="tab active">📷 Media</button>
+          <button id="tab-quarantine" class="tab">⚠️ Quarantine</button>
+          <button id="tab-duplicates" class="tab">🔗 Duplicates</button>
         </div>
-        <div id="media"></div>
+        <select id="quarantine-filter" class="hidden" style="margin-bottom: 8px;">
+          <option value="">All status</option>
+          <option value="pending">Pending</option>
+          <option value="accepted">Accepted</option>
+          <option value="rejected">Rejected</option>
+        </select>
+        <div id="list" class="list"></div>
+      </section>
+      
+      <!-- Right: Details & Debug -->
+      <section class="panel">
+        <div class="panel-title" id="detail-panel-title">Details</div>
+        <div id="detail-view" class="detail-view">
+          <div class="empty">Select an item to view details</div>
+        </div>
+        
+        <div class="panel-title" style="margin-top: 16px;">🔍 Debug Info</div>
+        <div id="debug-info" class="debug-grid">
+          <div class="debug-item">
+            <div class="debug-label">WAL Seq</div>
+            <div class="debug-value" id="debug-wal-seq">-</div>
+          </div>
+          <div class="debug-item">
+            <div class="debug-label">Uptime</div>
+            <div class="debug-value" id="debug-uptime">-</div>
+          </div>
+          <div class="debug-item">
+            <div class="debug-label">Last Snapshot</div>
+            <div class="debug-value" id="debug-snapshot">Never</div>
+          </div>
+          <div class="debug-item">
+            <div class="debug-label">System Time</div>
+            <div class="debug-value" id="debug-time">-</div>
+          </div>
+        </div>
       </section>
     </div>
     <script>
+      document.title = "FMV UI [JS Loading...]";
+      console.log("=== Family Media Vault UI Loading ===");
+      alert("JavaScript is loading...");
+      
       const listEl = document.getElementById("list");
-      const progressEl = document.getElementById("progress");
-      const detailsTitleEl = document.getElementById("details-title");
-      const detailsSubtitleEl = document.getElementById("details-subtitle");
-      const detailsEl = document.getElementById("details");
-      const mediaEl = document.getElementById("media");
-      const reloadBtn = document.getElementById("reload");
+      const detailViewEl = document.getElementById("detail-view");
+      const detailPanelTitle = document.getElementById("detail-panel-title");
       const tabMedia = document.getElementById("tab-media");
       const tabQuarantine = document.getElementById("tab-quarantine");
       const tabDuplicates = document.getElementById("tab-duplicates");
       const quarantineFilter = document.getElementById("quarantine-filter");
-      const quarantineActions = document.getElementById("quarantine-actions");
-      const quarantineAccept = document.getElementById("quarantine-accept");
-      const quarantineAcceptBtn = document.getElementById("quarantine-accept-btn");
-      const quarantineReason = document.getElementById("quarantine-reason");
-      const quarantineRejectBtn = document.getElementById("quarantine-reject-btn");
       const sourcePathEl = document.getElementById("source-path");
       const sourceAddBtn = document.getElementById("source-add");
       const sourceBrowseBtn = document.getElementById("source-browse");
       const sourceScanBtn = document.getElementById("source-scan");
-      const sourceRefreshBtn = document.getElementById("source-refresh");
       const snapshotCreateBtn = document.getElementById("snapshot-create");
-      const sourceStatusEl = document.getElementById("source-status");
-      const sourceDetailsEl = document.getElementById("source-details");
-      const statsEl = document.getElementById("stats");
+      const refreshAllBtn = document.getElementById("refresh-all");
       const sourcesListEl = document.getElementById("sources-list");
+      const jobQueueEl = document.getElementById("job-queue");
+      const jobLiveEl = document.getElementById("job-live");
+      
+      const metricSources = document.getElementById("metric-sources");
+      const metricMedia = document.getElementById("metric-media");
+      const metricEntries = document.getElementById("metric-entries");
+      const metricQuarantine = document.getElementById("metric-quarantine");
+      const metricDuplicates = document.getElementById("metric-duplicates");
+      const metricJobs = document.getElementById("metric-jobs");
+      
+      const debugWalSeq = document.getElementById("debug-wal-seq");
+      const debugUptime = document.getElementById("debug-uptime");
+      const debugSnapshot = document.getElementById("debug-snapshot");
+      const debugTime = document.getElementById("debug-time");
+      
       let currentTab = "media";
-      let currentQuarantineItem = null;
-      let lastQuarantineJobId = null;
-      let quarantinePoll = null;
+      let currentItem = null;
       let sources = [];
       let selectedSourceId = "";
-      let busyCount = 0;
-      let statusTimer = null;
-      let jobPoll = null;
-      let lastEntriesFetchedAt = 0;
-      let cachedEntriesSummary = "";
+      let startTime = Date.now();
+      let pollInterval = null;
 
       const fmtBytes = (value) => {
         if (!Number.isFinite(value)) return "-";
@@ -366,666 +462,492 @@ async function main(): Promise<void> {
         }
         return size.toFixed(1) + " " + units[idx];
       };
+      
+      const fmtDuration = (ms) => {
+        const seconds = Math.floor(ms / 1000);
+        const minutes = Math.floor(seconds / 60);
+        const hours = Math.floor(minutes / 60);
+        if (hours > 0) return hours + "h " + (minutes % 60) + "m";
+        if (minutes > 0) return minutes + "m " + (seconds % 60) + "s";
+        return seconds + "s";
+      };
+      
+      const fmtTime = (ts) => {
+        if (!ts) return "-";
+        const date = new Date(ts);
+        return date.toLocaleTimeString();
+      };
 
       const renderEmpty = (message) => {
-        listEl.innerHTML = "<div class=\\"empty\\">" + message + "</div>";
+        listEl.innerHTML = '<div class="empty">' + message + '</div>';
+      };
+      
+      const clearDetail = () => {
+        detailViewEl.innerHTML = '<div class="empty">Select an item to view details</div>';
+        detailPanelTitle.textContent = "Details";
+      };
+      
+      const renderDetailKV = (title, rows) => {
+        detailPanelTitle.textContent = title;
+        return '<div class="kv">' +
+          rows.map(([k, v]) => '<div class="kv-key">' + k + '</div><div class="kv-value">' + v + '</div>').join('') +
+          '</div>';
+      };
+      
+      const updateMetrics = (data) => {
+        metricSources.textContent = data.sources || 0;
+        metricMedia.textContent = data.media || 0;
+        metricEntries.textContent = data.entries || 0;
+        metricQuarantine.textContent = data.quarantine || 0;
+        metricDuplicates.textContent = data.duplicates || 0;
+        metricJobs.textContent = data.jobs || 0;
+      };
+      
+      const updateDebugInfo = () => {
+        debugUptime.textContent = fmtDuration(Date.now() - startTime);
+        debugTime.textContent = new Date().toLocaleTimeString();
       };
 
-      const renderKV = (rows) => {
-        detailsEl.innerHTML = rows
-          .map(([k, v]) => "<div class=\\"meta\\">" + k + "</div><div>" + v + "</div>")
-          .join("");
-      };
-
-      const setSourceStatus = (message, tone, ttl) => {
-        sourceStatusEl.textContent = message;
-        sourceStatusEl.classList.toggle("hidden", !message);
-        sourceStatusEl.classList.remove("status-busy", "status-ok", "status-error");
-        if (tone) {
-          sourceStatusEl.classList.add("status-" + tone);
-        }
-        if (statusTimer) {
-          clearTimeout(statusTimer);
-          statusTimer = null;
-        }
-        if (ttl) {
-          statusTimer = setTimeout(() => {
-            setSourceStatus("", "");
-          }, ttl);
-        }
-      };
-
-      const setProgress = (active) => {
-        progressEl.classList.toggle("hidden", !active);
-      };
-
-      const setControlsDisabled = (disabled) => {
-        sourceAddBtn.disabled = disabled;
-        sourceBrowseBtn.disabled = disabled;
-        sourceScanBtn.disabled = disabled || !selectedSourceId;
-        sourceRefreshBtn.disabled = disabled;
-        snapshotCreateBtn.disabled = disabled;
-        sourcePathEl.disabled = disabled;
-      };
-
-      const beginBusy = (message) => {
-        busyCount += 1;
-        setProgress(true);
-        setControlsDisabled(true);
-        if (message) {
-          setSourceStatus(message, "busy");
+      const fetchData = async (url) => {
+        try {
+          const res = await fetch(url);
+          if (!res.ok) return null;
+          return await res.json();
+        } catch {
+          return null;
         }
       };
-
-      const endBusy = () => {
-        busyCount = Math.max(0, busyCount - 1);
-        if (busyCount === 0) {
-          setProgress(false);
-          setControlsDisabled(false);
+      
+      const loadAllData = async () => {
+        const [sourcesData, mediaData, entriesData, quarantineData, duplicateData, jobsData] = await Promise.all([
+          fetchData("/sources"),
+          fetchData("/media"),
+          fetchData("/entries"),
+          fetchData("/quarantine"),
+          fetchData("/duplicate-links"),
+          fetchData("/jobs")
+        ]);
+        
+        sources = sourcesData?.sources ?? [];
+        const jobs = jobsData?.jobs ?? [];
+        const activeJobs = jobs.filter(j => j.status === "queued" || j.status === "running");
+        
+        updateMetrics({
+          sources: sources.length,
+          media: mediaData?.media?.length ?? 0,
+          entries: entriesData?.entries?.length ?? 0,
+          quarantine: quarantineData?.items?.filter(i => i.status === "pending").length ?? 0,
+          duplicates: duplicateData?.links?.length ?? 0,
+          jobs: activeJobs.length
+        });
+        
+        renderJobQueue(jobs.slice(0, 10));
+        renderSources();
+        
+        if (!selectedSourceId && sources.length > 0) {
+          selectedSourceId = sources[0].sourceId;
         }
-      };
-
-      const updateScanEnabled = () => {
         sourceScanBtn.disabled = !selectedSourceId;
       };
-
-      const loadSources = async () => {
-        beginBusy("Загружаю sources...");
-        try {
-          const res = await fetch("/sources");
-          if (!res.ok) {
-            setSourceStatus("Ошибка загрузки sources", "error", 4000);
-            return;
-          }
-          const data = await res.json();
-          sources = data.sources ?? [];
-          if (sources.length === 0) {
-            updateScanEnabled();
-            sourcesListEl.innerHTML = "<div class=\\"empty\\">Нет источников</div>";
-            sourceDetailsEl.textContent = "Источник не выбран";
-            selectedSourceId = "";
-            setSourceStatus("", "");
-            return;
-          }
-          renderSourcesList();
-          if (!selectedSourceId || !sources.some((source) => source.sourceId === selectedSourceId)) {
-            selectedSourceId = sources[0].sourceId;
-            cachedEntriesSummary = "";
-            lastEntriesFetchedAt = 0;
-          }
-          renderSourcesList();
-          updateScanEnabled();
-          refreshSelectedSourceDetails();
-          setSourceStatus("", "");
-        } finally {
-          endBusy();
-        }
-      };
-
-      const setSelectedSource = (sourceId) => {
-        selectedSourceId = sourceId;
-        cachedEntriesSummary = "";
-        lastEntriesFetchedAt = 0;
-        renderSourcesList();
-        updateScanEnabled();
-        refreshSelectedSourceDetails();
-      };
-
-      const renderSourcesList = () => {
+      
+      const renderSources = () => {
         if (sources.length === 0) {
-          sourcesListEl.innerHTML = "<div class=\\"empty\\">Нет источников</div>";
+          sourcesListEl.innerHTML = '<div class="empty">No sources</div>';
           return;
         }
-        sourcesListEl.innerHTML = "";
-        sources.forEach((source) => {
-          const card = document.createElement("div");
-          card.className = "source-card" + (source.sourceId === selectedSourceId ? " active" : "");
-          card.innerHTML = "<div class=\\"id\\">" + source.path + "</div>" +
-            "<div class=\\"meta\\">" + source.sourceId + "</div>";
-          card.addEventListener("click", () => setSelectedSource(source.sourceId));
-          sourcesListEl.appendChild(card);
-        });
+        sourcesListEl.innerHTML = sources.map(source => 
+          '<div class="source-card' + (source.sourceId === selectedSourceId ? ' active' : '') + '" data-source-id="' + source.sourceId + '">' +
+          '<div class="source-path">' + source.path + '</div>' +
+          '<div class="source-id">' + source.sourceId + '</div>' +
+          '</div>'
+        ).join('');
       };
-
-      const refreshSelectedSourceDetails = async (options) => {
-        if (!selectedSourceId) {
-          sourceDetailsEl.textContent = "Источник не выбран";
+      
+      const selectSource = (sourceId) => {
+        selectedSourceId = sourceId;
+        sourceScanBtn.disabled = false;
+        renderSources();
+      };
+      
+      sourcesListEl.addEventListener('click', (e) => {
+        const card = e.target.closest('.source-card');
+        if (card) {
+          const sourceId = card.getAttribute('data-source-id');
+          if (sourceId) selectSource(sourceId);
+        }
+      });
+      
+      const renderJobQueue = (jobs) => {
+        if (!jobs || jobs.length === 0) {
+          jobQueueEl.innerHTML = '<div class="empty">No jobs</div>';
+          jobLiveEl.style.display = 'none';
           return;
         }
-        const source = sources.find((item) => item.sourceId === selectedSourceId);
-        if (!source) {
-          sourceDetailsEl.textContent = "Источник не найден";
-          return;
-        }
-        const jobs = options?.jobs ?? (await fetchJobs());
-        const activeScanJobs = jobs.filter(
-          (job) =>
-            job.kind === "scan:source" &&
-            (job.status === "queued" || job.status === "running") &&
-            job.payload &&
-            job.payload.sourceId === selectedSourceId
-        );
-        let entriesSummary = cachedEntriesSummary;
-        const now = Date.now();
-        const shouldFetchEntries =
-          !options?.skipEntries && (!lastEntriesFetchedAt || now - lastEntriesFetchedAt > 5000);
-        if (shouldFetchEntries) {
-          const entriesRes = await fetch("/entries?sourceId=" + encodeURIComponent(selectedSourceId));
-          if (entriesRes.ok) {
-            const data = await entriesRes.json();
-            const entries = data.entries ?? [];
-            const total = entries.length;
-            const active = entries.filter((entry) => entry.state === "active").length;
-            const missing = entries.filter((entry) => entry.state === "missing").length;
-            const lastSeenAt = entries.reduce((acc, entry) => Math.max(acc, entry.lastSeenAt ?? 0), 0);
-            const lastSeen = lastSeenAt ? new Date(lastSeenAt).toLocaleString() : "-";
-            entriesSummary =
-              "<span class=\\"badge\\">Entries: " + total + "</span>" +
-              "<span class=\\"badge\\">Active: " + active + "</span>" +
-              "<span class=\\"badge\\">Missing: " + missing + "</span>" +
-              "<span class=\\"badge\\">Last seen: " + lastSeen + "</span>";
-            cachedEntriesSummary = entriesSummary;
-            lastEntriesFetchedAt = now;
-          }
-        }
-        const scanStatus =
-          activeScanJobs.length > 0
-            ? "<span class=\\"badge\\">Scan: " + activeScanJobs.length + " job(ов)</span>"
-            : "<span class=\\"badge\\">Scan: idle</span>";
-        sourceDetailsEl.innerHTML =
-          "<div class=\\"source-badges\\">" +
-          "<span class=\\"badge\\">" + source.path + "</span>" +
-          "<span class=\\"badge\\">id: " + source.sourceId + "</span>" +
-          scanStatus +
-          "</div>" +
-          (entriesSummary ? "<div class=\\"source-badges\\">" + entriesSummary + "</div>" : "");
+        
+        const hasActive = jobs.some(j => j.status === "running");
+        jobLiveEl.style.display = hasActive ? 'block' : 'none';
+        
+        jobQueueEl.innerHTML = jobs.map(job => {
+          const elapsed = job.startedAt ? fmtDuration(Date.now() - job.startedAt) : '-';
+          return '<div class="job-item">' +
+            '<div class="job-header">' +
+            '<span class="job-kind">' + job.kind + '</span>' +
+            '<span class="job-status ' + job.status + '">' + job.status + '</span>' +
+            '</div>' +
+            '<div class="job-meta">jobId: ' + job.jobId + ' | attempt: ' + job.attempt + ' | elapsed: ' + elapsed + '</div>' +
+            '</div>';
+        }).join('');
       };
-
-      const loadStats = async () => {
-        const safeFetch = async (url) => {
-          try {
-            const res = await fetch(url);
-            if (!res.ok) return null;
-            return await res.json();
-          } catch {
-            return null;
-          }
-        };
-        const [sourcesRes, entriesRes, mediaRes, quarantineRes, duplicateRes] = await Promise.all([
-          safeFetch("/sources"),
-          safeFetch("/entries"),
-          safeFetch("/media"),
-          safeFetch("/quarantine?status=pending"),
-          safeFetch("/duplicate-links")
-        ]);
-        const sourcesCount = sourcesRes?.sources?.length ?? 0;
-        const entriesCount = entriesRes?.entries?.length ?? 0;
-        const mediaCount = mediaRes?.media?.length ?? 0;
-        const quarantineCount = quarantineRes?.items?.length ?? 0;
-        const duplicateCount = duplicateRes?.links?.length ?? 0;
-        const updatedAt = new Date().toLocaleTimeString();
-        statsEl.innerHTML = [
-          ["Sources", sourcesCount],
-          ["Entries", entriesCount],
-          ["Media", mediaCount],
-          ["Quarantine", quarantineCount],
-          ["Duplicates", duplicateCount],
-          ["Обновлено", updatedAt]
-        ]
-          .map(([label, value]) => "<div class=\\"stat\\">" + label + ": " + value + "</div>")
-          .join("");
-      };
-
-      const fetchJobs = async () => {
+      
+      const createSource = async () => {
         try {
-          const res = await fetch("/jobs");
-          if (!res.ok) return [];
-          const data = await res.json();
-          return Array.isArray(data.jobs) ? data.jobs : [];
-        } catch {
-          return [];
-        }
-      };
-
-      const startJobPolling = async () => {
-        if (jobPoll) {
-          return;
-        }
-        jobPoll = setInterval(async () => {
-          const jobs = await fetchJobs();
-          const active = jobs.filter((job) => job.status === "queued" || job.status === "running");
-          if (active.length === 0) {
-            stopJobPolling();
-            setSourceStatus("Готово", "ok", 3000);
-            loadStats();
-            if (currentTab === "media") {
-              loadMediaList({ silent: true });
-            }
-            refreshSelectedSourceDetails({ jobs, skipEntries: false });
+          const path = sourcePathEl.value.trim();
+          console.log("createSource called, path:", path);
+          if (!path) {
+            alert("Please enter a path");
             return;
           }
-          setSourceStatus("В работе: " + active.length + " job(ов)", "busy");
-          loadStats();
-          if (currentTab === "media") {
-            loadMediaList({ silent: true });
-          }
-          refreshSelectedSourceDetails({ jobs, skipEntries: true });
-        }, 2000);
-      };
-
-      const stopJobPolling = () => {
-        if (!jobPoll) return;
-        clearInterval(jobPoll);
-        jobPoll = null;
-      };
-
-      const createSource = async () => {
-        const path = sourcePathEl.value.trim();
-        if (!path) {
-          setSourceStatus("Укажи путь", "error", 3000);
-          return;
-        }
-        beginBusy("Создаю source...");
-        try {
+          
+          sourceAddBtn.disabled = true;
+          sourceAddBtn.textContent = "Adding...";
+          
           const resp = await fetch("/sources", {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ path })
           });
-          if (!resp.ok) {
-            setSourceStatus("Ошибка создания source", "error", 4000);
-            return;
+          
+          if (resp.ok) {
+            sourcePathEl.value = "";
+            await loadAllData();
+            alert("Source added successfully!");
+          } else {
+            const err = await resp.json();
+            alert("Error adding source: " + (err.error || "unknown"));
           }
-          const data = await resp.json();
-          setSourceStatus("Источник создан", "ok", 3000);
-          sourcePathEl.value = "";
-          selectedSourceId = data.source.sourceId;
-          await loadSources();
-          updateScanEnabled();
-          loadStats();
+        } catch (error) {
+          console.error("createSource error:", error);
+          alert("Failed to add source: " + error.message);
         } finally {
-          endBusy();
+          sourceAddBtn.disabled = false;
+          sourceAddBtn.textContent = "+ Add Source";
         }
       };
-
+      
       const scanSource = async () => {
-        const sourceId = selectedSourceId;
-        if (!sourceId) {
-          setSourceStatus("Выбери source", "error", 3000);
-          return;
-        }
-        beginBusy("Запускаю scan...");
         try {
+          if (!selectedSourceId) {
+            alert("Please select a source first");
+            return;
+          }
+          
+          sourceScanBtn.disabled = true;
+          sourceScanBtn.textContent = "Scanning...";
+          
           const resp = await fetch("/jobs/scan", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ sourceId })
+            body: JSON.stringify({ sourceId: selectedSourceId })
           });
-          if (!resp.ok) {
-            setSourceStatus("Ошибка запуска scan", "error", 4000);
-            return;
+          
+          if (resp.ok) {
+            await loadAllData();
+            alert("Scan job started!");
+          } else {
+            alert("Failed to start scan");
           }
-          const data = await resp.json();
-          setSourceStatus("scan jobId: " + data.jobId, "ok", 5000);
-          loadStats();
-          startJobPolling();
+        } catch (error) {
+          console.error("scanSource error:", error);
+          alert("Failed to scan: " + error.message);
         } finally {
-          endBusy();
+          sourceScanBtn.disabled = !selectedSourceId;
+          sourceScanBtn.textContent = "▶ Scan";
         }
       };
-
-      const refreshSources = async () => {
-        await loadSources();
-        await refreshSelectedSourceDetails();
-        await loadStats();
-      };
-
+      
       const createSnapshot = async () => {
-        beginBusy("Создаю snapshot...");
         try {
+          snapshotCreateBtn.disabled = true;
+          snapshotCreateBtn.textContent = "Creating...";
+          
           const resp = await fetch("/snapshots", { method: "POST" });
-          if (!resp.ok) {
-            setSourceStatus("Ошибка создания snapshot", "error", 4000);
-            return;
+          if (resp.ok) {
+            const data = await resp.json();
+            debugSnapshot.textContent = fmtTime(Date.now());
+            alert("Snapshot created!");
+          } else {
+            alert("Failed to create snapshot");
           }
-          setSourceStatus("Snapshot создан", "ok", 4000);
+        } catch (error) {
+          console.error("createSnapshot error:", error);
+          alert("Failed to create snapshot: " + error.message);
         } finally {
-          endBusy();
+          snapshotCreateBtn.disabled = false;
+          snapshotCreateBtn.textContent = "💾";
         }
       };
-
+      
       const pickSourcePath = async () => {
-        beginBusy("Открываю диалог...");
         try {
+          console.log("pickSourcePath: requesting /fs/dialog");
           const resp = await fetch("/fs/dialog");
+          console.log("pickSourcePath: status", resp.status);
           if (!resp.ok) {
-            setSourceStatus("Не удалось открыть диалог", "error", 4000);
+            const err = await resp.json().catch(() => ({ error: "unknown" }));
+            console.error("pickSourcePath: dialog failed", err);
+            alert("Dialog failed: " + (err.error || "unknown"));
             return;
           }
           const data = await resp.json();
-          if (!data.path) {
-            setSourceStatus("Выбор отменён", "error", 3000);
-            return;
+          console.log("pickSourcePath: response", data);
+          if (data.path) {
+            sourcePathEl.value = data.path;
+            await createSource();
           }
-          sourcePathEl.value = data.path;
-          await createSource();
-        } finally {
-          endBusy();
+        } catch (error) {
+          console.error("pickSourcePath: error", error);
+          alert("Dialog error: " + (error && error.message ? error.message : String(error)));
         }
       };
 
-      const renderMediaDetails = (data) => {
+      const loadTab = async (tab) => {
+        clearDetail();
+        const data = await fetchData(
+          tab === "media" ? "/media" :
+          tab === "quarantine" ? "/quarantine" + (quarantineFilter.value ? "?status=" + quarantineFilter.value : "") :
+          "/duplicate-links"
+        );
+        
+        if (!data) {
+          renderEmpty("Error loading data");
+          return;
+        }
+        
+        const items = data.media || data.items || data.links || [];
+        if (items.length === 0) {
+          renderEmpty("No data. Add source and run scan.");
+          return;
+        }
+        
+        listEl.innerHTML = items.map(item => {
+          if (tab === "media") {
+            return '<div class="item" data-media-id="' + item.mediaId + '">' +
+              '<div class="item-header"><span class="item-id">' + item.mediaId + '</span>' +
+              '<span class="item-badge">' + fmtBytes(item.size) + '</span></div>' +
+              '<div class="item-meta">' + item.sha256.substring(0, 16) + '...</div></div>';
+          } else if (tab === "quarantine") {
+            const candidates = (item.candidateMediaIds || []).length;
+            return '<div class="item" data-quarantine-id="' + item.quarantineId + '">' +
+              '<div class="item-header"><span class="item-id">' + item.quarantineId + '</span>' +
+              '<span class="item-badge">' + item.status + '</span></div>' +
+              '<div class="item-meta">' + candidates + ' candidates | ' + item.sourceEntryId + '</div></div>';
+          } else {
+            return '<div class="item" data-duplicate-id="' + item.duplicateLinkId + '" data-duplicate-data="' + encodeURIComponent(JSON.stringify(item)) + '">' +
+              '<div class="item-header"><span class="item-id">' + item.duplicateLinkId + '</span>' +
+              '<span class="item-badge">' + item.level + '</span></div>' +
+              '<div class="item-meta">' + item.mediaId + '</div></div>';
+          }
+        }).join('');
+        
+        listEl.onclick = async (e) => {
+          const itemEl = e.target.closest('.item');
+          if (!itemEl) return;
+          
+          const mediaId = itemEl.getAttribute('data-media-id');
+          const quarantineId = itemEl.getAttribute('data-quarantine-id');
+          const duplicateData = itemEl.getAttribute('data-duplicate-data');
+          
+          if (mediaId) {
+            await viewMedia(mediaId);
+          } else if (quarantineId) {
+            await viewQuarantine(quarantineId);
+          } else if (duplicateData) {
+            viewDuplicate(JSON.parse(decodeURIComponent(duplicateData)));
+          }
+        };
+      };
+      
+      const viewMedia = async (mediaId) => {
+        const data = await fetchData("/media/" + mediaId);
         if (!data || !data.media) {
-          detailsEl.innerHTML = "";
-          mediaEl.innerHTML = "";
-          detailsTitleEl.textContent = "";
-          detailsSubtitleEl.textContent = "";
-          quarantineActions.classList.add("hidden");
+          clearDetail();
           return;
         }
         const { media, metadata } = data;
-        detailsTitleEl.textContent = "Media";
-        detailsSubtitleEl.textContent = "";
-        quarantineActions.classList.add("hidden");
-        renderKV([
-          ["mediaId", media.mediaId],
-          ["sha256", media.sha256],
-          ["size", fmtBytes(media.size)],
-          ["sourceEntryId", media.sourceEntryId],
-          ["kind", metadata?.kind ?? "-"],
-          ["mimeType", metadata?.mimeType ?? "-"],
-          ["width", metadata?.width ?? "-"],
-          ["height", metadata?.height ?? "-"],
-          ["durationMs", metadata?.durationMs ?? "-"],
-          ["takenAt", metadata?.takenAt ? new Date(metadata.takenAt).toISOString() : "-"]
+        const fileUrl = "/media/" + mediaId + "/file";
+        const mime = metadata?.mimeType || "";
+        const preview = mime.startsWith("image/") ? '<div class="media-preview"><img src="' + fileUrl + '" /></div>' :
+          mime.startsWith("video/") ? '<div class="media-preview"><video src="' + fileUrl + '" controls></video></div>' :
+          '<div class="media-preview"><a href="' + fileUrl + '" target="_blank">Download file</a></div>';
+        
+        detailViewEl.innerHTML = preview + 
+          renderDetailKV("📷 Media", [
+            ["mediaId", media.mediaId],
+            ["sha256", media.sha256],
+            ["size", fmtBytes(media.size)],
+            ["sourceEntryId", media.sourceEntryId],
+            ["kind", metadata?.kind || "-"],
+            ["mimeType", metadata?.mimeType || "-"],
+            ["width", metadata?.width || "-"],
+            ["height", metadata?.height || "-"],
+            ["durationMs", metadata?.durationMs || "-"],
+            ["takenAt", metadata?.takenAt ? new Date(metadata.takenAt).toISOString() : "-"]
+          ]);
+      };
+      
+      const viewQuarantine = async (quarantineId) => {
+        const data = await fetchData("/quarantine/" + quarantineId);
+        if (!data || !data.item) {
+          clearDetail();
+          return;
+        }
+        const item = data.item;
+        currentItem = item;
+        
+        let actions = '';
+        if (item.status === "pending" && item.candidateMediaIds && item.candidateMediaIds.length > 0) {
+          const options = item.candidateMediaIds.map(id => '<option value="' + id + '">' + id + '</option>').join('');
+          actions = '<div class="quarantine-actions">' +
+            '<select id="q-accept-select">' + options + '</select>' +
+            '<button id="q-accept-btn" class="small">✓ Accept</button>' +
+            '<input id="q-reject-reason" placeholder="Reject reason" style="flex:1;" />' +
+            '<button id="q-reject-btn" class="small danger">✗ Reject</button>' +
+            '</div>';
+        }
+        
+        detailViewEl.innerHTML = 
+          renderDetailKV("⚠️ Quarantine", [
+            ["quarantineId", item.quarantineId],
+            ["status", item.status],
+            ["sourceEntryId", item.sourceEntryId],
+            ["candidates", (item.candidateMediaIds || []).join(", ") || "-"],
+            ["acceptedMediaId", item.acceptedMediaId || "-"],
+            ["rejectedReason", item.rejectedReason || "-"],
+            ["createdAt", fmtTime(item.createdAt)],
+            ["resolvedAt", fmtTime(item.resolvedAt)]
+          ]) + actions;
+        
+        if (item.status === "pending") {
+          setTimeout(() => {
+            const acceptBtn = document.getElementById("q-accept-btn");
+            const rejectBtn = document.getElementById("q-reject-btn");
+            if (acceptBtn) acceptBtn.addEventListener("click", acceptQuarantine);
+            if (rejectBtn) rejectBtn.addEventListener("click", rejectQuarantine);
+          }, 0);
+        }
+      };
+      
+      const viewDuplicate = (link) => {
+        const data = typeof link === "string" ? null : link;
+        if (!data) return;
+        renderDetailKV("🔗 Duplicate Link", [
+          ["duplicateLinkId", data.duplicateLinkId],
+          ["level", data.level],
+          ["mediaId", data.mediaId],
+          ["sourceEntryId", data.sourceEntryId],
+          ["reason", data.reason || "-"],
+          ["createdAt", fmtTime(data.createdAt)]
         ]);
-        const fileUrl = "/media/" + media.mediaId + "/file";
-        const mime = metadata?.mimeType ?? "";
-        if (mime.startsWith("image/")) {
-          mediaEl.innerHTML = "<img src=\\"" + fileUrl + "\\" alt=\\"preview\\" />";
-        } else if (mime.startsWith("video/")) {
-          mediaEl.innerHTML = "<video src=\\"" + fileUrl + "\\" controls></video>";
-        } else {
-          mediaEl.innerHTML = "<a href=\\"" + fileUrl + "\\" target=\\"_blank\\">Скачать файл</a>";
+      };
+      
+      const acceptQuarantine = async () => {
+        if (!currentItem) return;
+        const select = document.getElementById("q-accept-select");
+        const acceptedMediaId = select?.value;
+        if (!acceptedMediaId) return;
+        
+        const resp = await fetch("/quarantine/" + currentItem.quarantineId + "/accept", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ acceptedMediaId })
+        });
+        if (resp.ok) {
+          await loadTab("quarantine");
+          await loadAllData();
         }
       };
-
-      const renderQuarantineDetails = (item) => {
-        detailsTitleEl.textContent = "Quarantine";
-        detailsSubtitleEl.textContent = lastQuarantineJobId ? "jobId: " + lastQuarantineJobId : "";
-        mediaEl.innerHTML = "";
-        currentQuarantineItem = item ?? null;
-        renderKV([
-          ["quarantineId", item?.quarantineId ?? "-"],
-          ["status", item?.status ?? "-"],
-          ["sourceEntryId", item?.sourceEntryId ?? "-"],
-          ["candidateMediaIds", Array.isArray(item?.candidateMediaIds) ? item.candidateMediaIds.join(", ") : "-"],
-          ["acceptedMediaId", item?.acceptedMediaId ?? "-"],
-          ["rejectedReason", item?.rejectedReason ?? "-"],
-          ["createdAt", item?.createdAt ? new Date(item.createdAt).toISOString() : "-"],
-          ["resolvedAt", item?.resolvedAt ? new Date(item.resolvedAt).toISOString() : "-"]
-        ]);
-        if (item && item.status === "pending") {
-          const candidates = Array.isArray(item.candidateMediaIds) ? item.candidateMediaIds : [];
-          quarantineAccept.innerHTML = candidates
-            .map((id) => "<option value=\\"" + id + "\\">" + id + "</option>")
-            .join("");
-          quarantineReason.value = "";
-          quarantineActions.classList.remove("hidden");
-        } else {
-          quarantineActions.classList.add("hidden");
+      
+      const rejectQuarantine = async () => {
+        if (!currentItem) return;
+        const input = document.getElementById("q-reject-reason");
+        const reason = input?.value.trim();
+        
+        const resp = await fetch("/quarantine/" + currentItem.quarantineId + "/reject", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ reason: reason || undefined })
+        });
+        if (resp.ok) {
+          await loadTab("quarantine");
+          await loadAllData();
         }
       };
-
-      const renderDuplicateDetails = (link) => {
-        detailsTitleEl.textContent = "Duplicate link";
-        detailsSubtitleEl.textContent = "";
-        mediaEl.innerHTML = "";
-        quarantineActions.classList.add("hidden");
-        renderKV([
-          ["duplicateLinkId", link?.duplicateLinkId ?? "-"],
-          ["level", link?.level ?? "-"],
-          ["mediaId", link?.mediaId ?? "-"],
-          ["sourceEntryId", link?.sourceEntryId ?? "-"],
-          ["reason", link?.reason ?? "-"],
-          ["createdAt", link?.createdAt ? new Date(link.createdAt).toISOString() : "-"]
-        ]);
-      };
-
-      const loadMediaList = async (options) => {
-        const silent = Boolean(options?.silent);
-        if (!silent) {
-          beginBusy("Загружаю media...");
-          listEl.innerHTML = "<div class=\\"empty\\">Загрузка...</div>";
-          detailsEl.innerHTML = "";
-          mediaEl.innerHTML = "";
-          detailsTitleEl.textContent = "";
-          detailsSubtitleEl.textContent = "";
-          quarantineActions.classList.add("hidden");
-        }
-        try {
-          const res = await fetch("/media");
-          if (!res.ok) {
-            renderEmpty("Ошибка загрузки списка");
-            if (!silent) {
-              setSourceStatus("Ошибка загрузки media", "error", 4000);
-            }
-            return;
-          }
-          const data = await res.json();
-          const items = data.media ?? [];
-          if (items.length === 0) {
-            renderEmpty("Нет данных. Добавьте source и запустите scan.");
-            if (!silent) {
-              setSourceStatus("", "");
-            }
-            return;
-          }
-          listEl.innerHTML = "";
-          items.forEach((item) => {
-            const card = document.createElement("div");
-            card.className = "item";
-            card.innerHTML = "<div class=\\"id\\">" + item.mediaId + "</div>" +
-              "<div class=\\"meta\\">" + fmtBytes(item.size) + "</div>" +
-              "<div class=\\"meta\\">" + item.sha256 + "</div>";
-            card.addEventListener("click", async () => {
-              const resp = await fetch("/media/" + item.mediaId);
-              if (!resp.ok) {
-                renderMediaDetails(null);
-                return;
-              }
-              const details = await resp.json();
-              renderMediaDetails(details);
-            });
-            listEl.appendChild(card);
-          });
-          if (!silent) {
-            setSourceStatus("", "");
-          }
-        } finally {
-          if (!silent) {
-            endBusy();
-          }
-        }
-      };
-
-      const loadQuarantineList = async () => {
-        beginBusy("Загружаю quarantine...");
-        listEl.innerHTML = "<div class=\\"empty\\">Загрузка...</div>";
-        detailsEl.innerHTML = "";
-        mediaEl.innerHTML = "";
-        detailsTitleEl.textContent = "";
-        detailsSubtitleEl.textContent = "";
-        quarantineActions.classList.add("hidden");
-        try {
-          const status = quarantineFilter.value;
-          const url = status ? "/quarantine?status=" + status : "/quarantine";
-          const res = await fetch(url);
-          if (!res.ok) {
-            renderEmpty("Ошибка загрузки quarantine");
-            setSourceStatus("Ошибка загрузки quarantine", "error", 4000);
-            return;
-          }
-          const data = await res.json();
-          const items = data.items ?? [];
-          if (items.length === 0) {
-            renderEmpty("Пусто");
-            setSourceStatus("", "");
-            return;
-          }
-          listEl.innerHTML = "";
-          items.forEach((item) => {
-            const card = document.createElement("div");
-            card.className = "item";
-            const candidateCount = Array.isArray(item.candidateMediaIds) ? item.candidateMediaIds.length : 0;
-            card.innerHTML = "<div class=\\"id\\">" + item.quarantineId + "</div>" +
-              "<div class=\\"meta\\">" + item.status + "</div>" +
-              "<div class=\\"meta\\">" + item.sourceEntryId + "</div>" +
-              "<div class=\\"meta\\">candidates: " + candidateCount + "</div>";
-            card.addEventListener("click", async () => {
-              const resp = await fetch("/quarantine/" + item.quarantineId);
-              if (!resp.ok) {
-                renderQuarantineDetails(null);
-                return;
-              }
-              const details = await resp.json();
-              renderQuarantineDetails(details.item);
-            });
-            listEl.appendChild(card);
-          });
-          setSourceStatus("", "");
-        } finally {
-          endBusy();
-        }
-      };
-
-      const loadDuplicateLinks = async () => {
-        beginBusy("Загружаю duplicate links...");
-        listEl.innerHTML = "<div class=\\"empty\\">Загрузка...</div>";
-        detailsEl.innerHTML = "";
-        mediaEl.innerHTML = "";
-        detailsTitleEl.textContent = "";
-        detailsSubtitleEl.textContent = "";
-        quarantineActions.classList.add("hidden");
-        try {
-          const res = await fetch("/duplicate-links");
-          if (!res.ok) {
-            renderEmpty("Ошибка загрузки duplicate links");
-            setSourceStatus("Ошибка загрузки duplicate links", "error", 4000);
-            return;
-          }
-          const data = await res.json();
-          const links = data.links ?? [];
-          if (links.length === 0) {
-            renderEmpty("Пусто");
-            setSourceStatus("", "");
-            return;
-          }
-          listEl.innerHTML = "";
-          links.forEach((link) => {
-            const card = document.createElement("div");
-            card.className = "item";
-            card.innerHTML = "<div class=\\"id\\">" + link.duplicateLinkId + "</div>" +
-              "<div class=\\"meta\\">" + link.level + "</div>" +
-              "<div class=\\"meta\\">" + link.mediaId + "</div>";
-            card.addEventListener("click", () => {
-              renderDuplicateDetails(link);
-            });
-            listEl.appendChild(card);
-          });
-          setSourceStatus("", "");
-        } finally {
-          endBusy();
-        }
-      };
-
-      const refreshQuarantineDetails = async () => {
-        if (!currentQuarantineItem) return;
-        const resp = await fetch("/quarantine/" + currentQuarantineItem.quarantineId);
-        if (!resp.ok) return;
-        const details = await resp.json();
-        renderQuarantineDetails(details.item);
-      };
-
+      
       const setTab = (tab) => {
         currentTab = tab;
         tabMedia.classList.toggle("active", tab === "media");
         tabQuarantine.classList.toggle("active", tab === "quarantine");
         tabDuplicates.classList.toggle("active", tab === "duplicates");
         quarantineFilter.classList.toggle("hidden", tab !== "quarantine");
-        if (tab !== "quarantine") {
-          currentQuarantineItem = null;
-          lastQuarantineJobId = null;
-          quarantineActions.classList.add("hidden");
-        }
-        if (tab === "media") {
-          loadMediaList();
-        } else if (tab === "quarantine") {
-          loadQuarantineList();
-        } else {
-          loadDuplicateLinks();
-        }
-        loadSources();
-        if (quarantinePoll) {
-          clearInterval(quarantinePoll);
-          quarantinePoll = null;
-        }
-        if (tab === "quarantine") {
-          quarantinePoll = setInterval(() => {
-            loadQuarantineList();
-            refreshQuarantineDetails();
-          }, 5000);
-        }
+        loadTab(tab);
       };
-
-      const submitQuarantine = async (action) => {
-        if (!currentQuarantineItem) return;
-        const url = "/quarantine/" + currentQuarantineItem.quarantineId + "/" + action;
-        const payload = action === "accept"
-          ? { acceptedMediaId: quarantineAccept.value }
-          : { reason: quarantineReason.value.trim() || undefined };
-        const resp = await fetch(url, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(payload)
-        });
-        if (resp.ok) {
-          const body = await resp.json();
-          lastQuarantineJobId = body.jobId ?? null;
-          loadQuarantineList();
-          await refreshQuarantineDetails();
-        }
+      
+      const startPolling = () => {
+        if (pollInterval) return;
+        pollInterval = setInterval(async () => {
+          await loadAllData();
+          updateDebugInfo();
+          if (currentTab) {
+            await loadTab(currentTab);
+          }
+        }, 3000);
       };
-
-      const checkJobsAndStartPolling = async () => {
-        const jobs = await fetchJobs();
-        const active = jobs.filter((job) => job.status === "queued" || job.status === "running");
-        if (active.length > 0) {
-          setSourceStatus("В работе: " + active.length + " job(ов)", "busy");
-          startJobPolling();
-        }
-        refreshSelectedSourceDetails({ jobs, skipEntries: false });
-      };
-
-      tabMedia.addEventListener("click", () => setTab("media"));
-      tabQuarantine.addEventListener("click", () => setTab("quarantine"));
-      tabDuplicates.addEventListener("click", () => setTab("duplicates"));
-      quarantineFilter.addEventListener("change", loadQuarantineList);
-      reloadBtn.addEventListener("click", () => {
-        setTab(currentTab);
-        refreshSources();
+      
+      console.log("Attaching event listeners...");
+      
+      if (tabMedia) tabMedia.addEventListener("click", () => {
+        console.log("Tab Media clicked");
+        setTab("media");
       });
-      quarantineAcceptBtn.addEventListener("click", () => submitQuarantine("accept"));
-      quarantineRejectBtn.addEventListener("click", () => submitQuarantine("reject"));
-      sourceAddBtn.addEventListener("click", createSource);
+      if (tabQuarantine) tabQuarantine.addEventListener("click", () => {
+        console.log("Tab Quarantine clicked");
+        setTab("quarantine");
+      });
+      if (tabDuplicates) tabDuplicates.addEventListener("click", () => {
+        console.log("Tab Duplicates clicked");
+        setTab("duplicates");
+      });
+      if (quarantineFilter) quarantineFilter.addEventListener("change", () => {
+        console.log("Quarantine filter changed");
+        loadTab("quarantine");
+      });
+      if (refreshAllBtn) refreshAllBtn.addEventListener("click", async () => {
+        console.log("Refresh All clicked");
+        await loadAllData();
+        if (currentTab) await loadTab(currentTab);
+      });
+      if (sourceAddBtn) {
+        console.log("sourceAddBtn event listener attached");
+        sourceAddBtn.addEventListener("click", () => {
+          console.log("sourceAddBtn CLICKED!");
+          createSource();
+        });
+      } else {
+        console.error("sourceAddBtn is NULL!");
+      }
       sourceScanBtn.addEventListener("click", scanSource);
       sourceBrowseBtn.addEventListener("click", pickSourcePath);
-      sourceRefreshBtn.addEventListener("click", refreshSources);
       snapshotCreateBtn.addEventListener("click", createSnapshot);
-      loadSources();
-      loadStats();
-      checkJobsAndStartPolling();
+      
+      console.log("Starting initialization...");
+      loadAllData().then(() => console.log("loadAllData complete"));
       setTab("media");
+      startPolling();
+      updateDebugInfo();
+      setInterval(updateDebugInfo, 1000);
+      console.log("=== UI Initialization Complete ===");
+      document.title = "FMV UI [Ready]";
+      setTimeout(() => alert("UI Ready! All buttons should work now."), 500);
     </script>
   </body>
 </html>`
@@ -1043,22 +965,54 @@ async function main(): Promise<void> {
           sendJson(res, 400, { error: "unsupported_platform" });
           return;
         }
+        console.log("[/fs/dialog] Request received");
+        const systemRoot = process.env.SystemRoot ?? process.env.SYSTEMROOT;
+        const powershellPath = systemRoot
+          ? path.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+          : "powershell";
         const script = [
           "Add-Type -AssemblyName System.Windows.Forms",
+          "Add-Type -AssemblyName System.Drawing",
+          "Add-Type @'",
+          "using System;",
+          "using System.Runtime.InteropServices;",
+          "public static class Win32 {",
+          "  [DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr hWnd);",
+          "  [DllImport(\"user32.dll\")] public static extern bool BringWindowToTop(IntPtr hWnd);",
+          "  [DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);",
+          "}",
+          "'@",
+          "$owner = New-Object System.Windows.Forms.Form",
+          "$owner.FormBorderStyle = 'None'",
+          "$owner.ShowInTaskbar = $false",
+          "$owner.StartPosition = 'Manual'",
+          "$owner.Location = New-Object System.Drawing.Point(0, 0)",
+          "$owner.Size = New-Object System.Drawing.Size(1, 1)",
+          "$owner.TopMost = $true",
+          "$owner.Opacity = 0.01",
+          "$owner.Show()",
+          "$owner.Activate()",
+          "[Win32]::ShowWindow($owner.Handle, 5) | Out-Null",
+          "[Win32]::BringWindowToTop($owner.Handle) | Out-Null",
+          "[Win32]::SetForegroundWindow($owner.Handle) | Out-Null",
           "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog",
           "$dialog.Description = 'Выберите папку с медиа'",
-          "if ($dialog.ShowDialog() -eq 'OK') {",
+          "$dialog.ShowNewFolderButton = $true",
+          "if ($dialog.ShowDialog($owner) -eq 'OK') {",
           "  $dialog.SelectedPath",
-          "}"
+          "}",
+          "$owner.Close()",
+          "$owner.Dispose()"
         ].join("; ");
         const pickPath = () =>
           new Promise<string>((resolve, reject) => {
             execFile(
-              "powershell",
-              ["-NoProfile", "-Command", script],
-              { windowsHide: true },
-              (error, stdout) => {
+              powershellPath,
+              ["-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", script],
+              { windowsHide: true, timeout: 120000, maxBuffer: 1024 * 1024 },
+              (error, stdout, stderr) => {
                 if (error) {
+                  console.error("[/fs/dialog] PowerShell error:", stderr || error.message);
                   reject(error);
                   return;
                 }
@@ -1069,7 +1023,7 @@ async function main(): Promise<void> {
         try {
           const selected = await pickPath();
           sendJson(res, 200, { path: selected || null });
-        } catch {
+        } catch (error) {
           sendJson(res, 500, { error: "dialog_failed" });
         }
         return;
