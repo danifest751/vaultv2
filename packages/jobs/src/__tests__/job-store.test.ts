@@ -59,4 +59,38 @@ describe("JobStore", () => {
     expect(reset).toBe(1);
     expect(job?.status).toBe("queued");
   });
+
+  it("moves job back to queued on retry scheduling", () => {
+    const store = new JobStore();
+    const jobId = newJobId();
+
+    store.applyEvent(
+      createEvent("JOB_ENQUEUED", {
+        jobId,
+        kind: "metadata:extract"
+      })
+    );
+    store.applyEvent(
+      createEvent("JOB_STARTED", {
+        jobId,
+        kind: "metadata:extract",
+        attempt: 1
+      })
+    );
+    store.applyEvent(
+      createEvent("JOB_RETRY_SCHEDULED", {
+        jobId,
+        kind: "metadata:extract",
+        attempt: 1,
+        retryAt: 1234,
+        error: "tool_missing"
+      })
+    );
+
+    const job = store.get(jobId);
+    expect(job?.status).toBe("queued");
+    expect(job?.attempts).toBe(1);
+    expect(job?.lastError).toBe("tool_missing");
+    expect(job?.updatedAt).toBe(1234);
+  });
 });

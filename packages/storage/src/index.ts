@@ -1,4 +1,5 @@
 export * from "./hash";
+export * from "./derived";
 export * from "./metadata";
 export * from "./rebuild";
 export * from "./snapshot";

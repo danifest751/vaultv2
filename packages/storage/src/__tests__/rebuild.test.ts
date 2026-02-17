@@ -28,7 +28,9 @@ describe("rebuildDomainState", () => {
     const state = new DomainState();
     const sourceId = newSourceId();
     const entryId = newSourceEntryId();
+    const entryIdB = newSourceEntryId();
     const mediaId = newMediaId();
+    const mediaIdB = newMediaId();
 
     const sourceCreated = createEvent("SOURCE_CREATED", {
       source: {
@@ -55,6 +57,20 @@ describe("rebuildDomainState", () => {
       }
     });
 
+    const entryUpsertedB = createEvent("SOURCE_ENTRY_UPSERTED", {
+      entry: {
+        sourceEntryId: entryIdB,
+        sourceId,
+        kind: "file",
+        path: "/source/b.jpg",
+        size: 11,
+        mtimeMs: 3,
+        fingerprint: "fp-b",
+        lastSeenAt: 4,
+        state: "active"
+      }
+    });
+
     for (const event of [sourceCreated, entryUpserted]) {
       await writer.append(event);
       state.applyEvent(event);
@@ -75,16 +91,50 @@ describe("rebuildDomainState", () => {
       }
     });
 
-    await writer.append(mediaImported);
-    state.applyEvent(mediaImported);
+    const metadataExtractedA = createEvent("MEDIA_METADATA_EXTRACTED", {
+      mediaId,
+      sourceEntryId: entryId,
+      metadata: {
+        kind: "photo",
+        raw: { perceptualHash: "abcdefff00000000" }
+      }
+    });
+
+    const mediaImportedB = createEvent("MEDIA_IMPORTED", {
+      media: {
+        mediaId: mediaIdB,
+        sha256: "sha256-b",
+        size: 11,
+        sourceEntryId: entryIdB
+      }
+    });
+
+    const metadataExtractedB = createEvent("MEDIA_METADATA_EXTRACTED", {
+      mediaId: mediaIdB,
+      sourceEntryId: entryIdB,
+      metadata: {
+        kind: "photo",
+        raw: { perceptualHash: "abcdefff000000ff" }
+      }
+    });
+
+    for (const event of [entryUpsertedB, mediaImported, metadataExtractedA, mediaImportedB, metadataExtractedB]) {
+      await writer.append(event);
+      state.applyEvent(event);
+    }
 
     await writer.close();
 
     const rebuilt = await rebuildDomainState({ walDir, snapshotsDir, hmacSecret });
 
     expect(rebuilt.sources.listSources()).toHaveLength(1);
-    expect(rebuilt.sources.listEntries()).toHaveLength(1);
-    expect(rebuilt.media.list()).toHaveLength(1);
+    expect(rebuilt.sources.listEntries()).toHaveLength(2);
+    expect(rebuilt.media.list()).toHaveLength(2);
     expect(rebuilt.media.get(mediaId)).toBeDefined();
+    expect(rebuilt.metadata.getPerceptualHash(mediaId)).toBe("abcdefff00000000");
+    expect(rebuilt.metadata.getPerceptualHash(mediaIdB)).toBe("abcdefff000000ff");
+    expect(new Set(rebuilt.metadata.listMediaIdsByPerceptualHashPrefix("abcdefff00000000"))).toEqual(
+      new Set([mediaId, mediaIdB])
+    );
   });
 });

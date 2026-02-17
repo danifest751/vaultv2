@@ -250,11 +250,14 @@ export class IngestStore {
 
 export class MediaMetadataStore {
   private readonly metadataByMediaId = new Map<MediaId, MediaMetadata>();
+  private readonly perceptualHashByMediaId = new Map<MediaId, string>();
+  private readonly perceptualHashPrefixIndex = new Map<string, Set<MediaId>>();
+  private readonly perceptualHashPrefixLength = 4;
 
   applyEvent(event: DomainEvent): void {
     switch (event.type) {
       case "MEDIA_METADATA_EXTRACTED":
-        this.metadataByMediaId.set(event.payload.mediaId, event.payload.metadata);
+        this.set(event.payload.mediaId, event.payload.metadata);
         return;
       default:
         return;
@@ -272,8 +275,45 @@ export class MediaMetadataStore {
     }));
   }
 
+  listMediaIdsByPerceptualHashPrefix(prefix: string): MediaId[] {
+    const normalized = normalizePerceptualHash(prefix);
+    if (!normalized) {
+      return [];
+    }
+    const key = normalized.slice(0, this.perceptualHashPrefixLength);
+    const bucket = this.perceptualHashPrefixIndex.get(key);
+    return bucket ? Array.from(bucket) : [];
+  }
+
+  getPerceptualHash(mediaId: MediaId): string | undefined {
+    return this.perceptualHashByMediaId.get(mediaId);
+  }
+
   set(mediaId: MediaId, metadata: MediaMetadata): void {
     this.metadataByMediaId.set(mediaId, metadata);
+    const previous = this.perceptualHashByMediaId.get(mediaId);
+    if (previous) {
+      const previousPrefix = previous.slice(0, this.perceptualHashPrefixLength);
+      const previousBucket = this.perceptualHashPrefixIndex.get(previousPrefix);
+      if (previousBucket) {
+        previousBucket.delete(mediaId);
+        if (previousBucket.size === 0) {
+          this.perceptualHashPrefixIndex.delete(previousPrefix);
+        }
+      }
+      this.perceptualHashByMediaId.delete(mediaId);
+    }
+
+    const perceptualHash = normalizePerceptualHash(metadata.raw?.perceptualHash);
+    if (!perceptualHash) {
+      return;
+    }
+
+    this.perceptualHashByMediaId.set(mediaId, perceptualHash);
+    const prefix = perceptualHash.slice(0, this.perceptualHashPrefixLength);
+    const bucket = this.perceptualHashPrefixIndex.get(prefix) ?? new Set<MediaId>();
+    bucket.add(mediaId);
+    this.perceptualHashPrefixIndex.set(prefix, bucket);
   }
 }
 
@@ -302,6 +342,18 @@ export class DuplicateLinkStore {
 
   list(): DuplicateLink[] {
     return Array.from(this.linksByKey.values());
+  }
+
+  hasForSourceEntry(sourceEntryId: SourceEntryId, level?: DuplicateLink["level"]): boolean {
+    for (const link of this.linksByKey.values()) {
+      if (link.sourceEntryId !== sourceEntryId) {
+        continue;
+      }
+      if (!level || link.level === level) {
+        return true;
+      }
+    }
+    return false;
   }
 
   set(link: DuplicateLink): void {
@@ -415,4 +467,12 @@ function duplicateLinkKey(
   level: DuplicateLink["level"]
 ): string {
   return `${mediaId}:${sourceEntryId}:${level}`;
+}
+
+function normalizePerceptualHash(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  return /^[0-9a-f]{16}$/.test(normalized) ? normalized : undefined;
 }

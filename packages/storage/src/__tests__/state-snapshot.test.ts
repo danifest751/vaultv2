@@ -91,7 +91,7 @@ describe("state snapshot", () => {
         kind: "photo",
         takenAt: 2,
         mimeType: "image/jpeg",
-        raw: { ext: ".jpg" }
+        raw: { ext: ".jpg", perceptualHash: "abcdefff00000000" }
       }
     });
 
@@ -155,8 +155,12 @@ describe("state snapshot", () => {
       kind: "photo",
       takenAt: 2,
       mimeType: "image/jpeg",
-      raw: { ext: ".jpg" }
+      raw: { ext: ".jpg", perceptualHash: "abcdefff00000000" }
     });
+    expect(rebuilt.metadata.getPerceptualHash(mediaId)).toBe("abcdefff00000000");
+    expect(new Set(rebuilt.metadata.listMediaIdsByPerceptualHashPrefix("abcdefff00000000"))).toEqual(
+      new Set([mediaId])
+    );
     const rebuiltQuarantine = rebuilt.quarantine.get(quarantineId);
     expect(rebuiltQuarantine?.status).toBe("accepted");
     expect(rebuiltQuarantine?.acceptedMediaId).toBe(mediaId);

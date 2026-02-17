@@ -9,6 +9,12 @@ export interface JobHandlerContext {
   startedAt: TimestampMs;
 }
 
+function computeRetryBackoffMs(attempt: number): number {
+  const baseMs = 500;
+  const backoff = baseMs * 2 ** Math.max(0, attempt - 1);
+  return Math.min(backoff, 30_000);
+}
+
 export type JobHandler = (context: JobHandlerContext) => Promise<void>;
 
 export interface JobDefinition {
@@ -39,6 +45,7 @@ export class JobEngine {
   private readonly registry = new Map<string, RegisteredJob>();
   private readonly queue: JobId[] = [];
   private readonly inflight = new Set<Promise<void>>();
+  private readonly retryTimers = new Map<JobId, ReturnType<typeof setTimeout>>();
   private activeCount = 0;
 
   constructor(options: JobEngineOptions) {
@@ -70,6 +77,14 @@ export class JobEngine {
     return jobId;
   }
 
+  async enqueueDeduped(kind: string, payload?: JsonObject): Promise<JobId> {
+    const existing = this.store.findActiveByKindAndPayload(kind, payload);
+    if (existing) {
+      return existing.jobId;
+    }
+    return this.enqueue(kind, payload);
+  }
+
   resumePending(): number {
     this.store.resetRunningToQueued();
     const runnable = this.store.getRunnableJobIds();
@@ -83,7 +98,7 @@ export class JobEngine {
   async runUntilIdle(): Promise<void> {
     while (true) {
       this.schedule();
-      if (this.queue.length === 0 && this.inflight.size === 0) {
+      if (this.queue.length === 0 && this.inflight.size === 0 && this.retryTimers.size === 0) {
         return;
       }
       if (this.inflight.size === 0) {
@@ -169,12 +184,39 @@ export class JobEngine {
       await this.appendEvent(createEvent("JOB_COMPLETED", { jobId }, { jobId }));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      await this.appendEvent(
-        createEvent("JOB_FAILED", { jobId, error: message }, { jobId })
-      );
+      if (attempt < registered.maxAttempts) {
+        const backoffMs = computeRetryBackoffMs(attempt);
+        const retryAt = Date.now() + backoffMs;
+        await this.appendEvent(
+          createEvent(
+            "JOB_RETRY_SCHEDULED",
+            { jobId, kind: job.kind, attempt, retryAt, error: message },
+            { jobId }
+          )
+        );
+        this.scheduleRetry(jobId, backoffMs);
+      } else {
+        await this.appendEvent(
+          createEvent("JOB_FAILED", { jobId, error: message }, { jobId })
+        );
+      }
     } finally {
       this.activeCount -= 1;
     }
+  }
+
+  private scheduleRetry(jobId: JobId, backoffMs: number): void {
+    const existingTimer = this.retryTimers.get(jobId);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+    }
+
+    const timer = setTimeout(() => {
+      this.retryTimers.delete(jobId);
+      this.queue.push(jobId);
+      this.schedule();
+    }, Math.max(0, backoffMs));
+    this.retryTimers.set(jobId, timer);
   }
 
   private async appendEvent(event: DomainEvent): Promise<void> {

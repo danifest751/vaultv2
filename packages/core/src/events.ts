@@ -103,6 +103,7 @@ export type EventType =
   | "QUARANTINE_REJECTED"
   | "JOB_ENQUEUED"
   | "JOB_STARTED"
+  | "JOB_RETRY_SCHEDULED"
   | "JOB_COMPLETED"
   | "JOB_FAILED";
 
@@ -138,6 +139,13 @@ export type EventPayloads = {
   };
   JOB_ENQUEUED: { jobId: JobId; kind: string; payload?: JsonObject };
   JOB_STARTED: { jobId: JobId; kind: string; attempt: number };
+  JOB_RETRY_SCHEDULED: {
+    jobId: JobId;
+    kind: string;
+    attempt: number;
+    retryAt: TimestampMs;
+    error: string;
+  };
   JOB_COMPLETED: { jobId: JobId };
   JOB_FAILED: { jobId: JobId; error: string };
 };

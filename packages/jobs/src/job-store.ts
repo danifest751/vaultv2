@@ -13,6 +13,35 @@ export interface JobRecord {
   lastError?: string;
 }
 
+function stablePayloadKey(payload: JsonObject | undefined): string {
+  if (!payload) {
+    return "";
+  }
+  return JSON.stringify(sortJsonObject(payload));
+}
+
+function sortJsonObject(value: JsonObject): JsonObject {
+  const entries = Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  const sorted: JsonObject = {};
+  for (const [key, item] of entries) {
+    if (item && typeof item === "object" && !Array.isArray(item)) {
+      sorted[key] = sortJsonObject(item as JsonObject);
+      continue;
+    }
+    if (Array.isArray(item)) {
+      sorted[key] = item.map((entry) => {
+        if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+          return sortJsonObject(entry as JsonObject);
+        }
+        return entry;
+      });
+      continue;
+    }
+    sorted[key] = item;
+  }
+  return sorted;
+}
+
 export class JobStoreError extends Error {
   constructor(message: string) {
     super(message);
@@ -22,6 +51,22 @@ export class JobStoreError extends Error {
 
 export class JobStore {
   private readonly jobs = new Map<JobId, JobRecord>();
+
+  findActiveByKindAndPayload(kind: string, payload: JsonObject | undefined): JobRecord | undefined {
+    const targetPayloadKey = stablePayloadKey(payload);
+    for (const job of this.jobs.values()) {
+      if (job.kind !== kind) {
+        continue;
+      }
+      if (job.status !== "queued" && job.status !== "running") {
+        continue;
+      }
+      if (stablePayloadKey(job.payload) === targetPayloadKey) {
+        return job;
+      }
+    }
+    return undefined;
+  }
 
   applyEvent(event: DomainEvent): void {
     switch (event.type) {
@@ -35,7 +80,19 @@ export class JobStore {
         }
         job.status = "running";
         job.attempts = Math.max(job.attempts, event.payload.attempt);
+        job.lastError = undefined;
         job.updatedAt = event.createdAt;
+        return;
+      }
+      case "JOB_RETRY_SCHEDULED": {
+        const job = this.require(event.payload.jobId);
+        if (job.kind !== event.payload.kind) {
+          throw new JobStoreError(`Job kind mismatch for ${job.jobId}`);
+        }
+        job.status = "queued";
+        job.attempts = Math.max(job.attempts, event.payload.attempt);
+        job.lastError = event.payload.error;
+        job.updatedAt = event.payload.retryAt;
         return;
       }
       case "JOB_COMPLETED": {
