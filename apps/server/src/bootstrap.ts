@@ -29,6 +29,7 @@ export interface BootstrapOptions {
   vaultDir: string;
   derivedDir: string;
   hmacSecret: string;
+  derivedGenerateMaxAttempts: number;
   dedupStrongDistanceThreshold: number;
   dedupProbableDistanceThreshold: number;
 }
@@ -138,6 +139,7 @@ export async function bootstrapServerRuntime(options: BootstrapOptions): Promise
   });
   jobEngine.register({
     kind: "derived:generate",
+    maxAttempts: options.derivedGenerateMaxAttempts,
     handler: createDerivedGenerateJobHandler({ state, vault, derived })
   });
   jobEngine.register({

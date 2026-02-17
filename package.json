@@ -9,7 +9,9 @@
   "scripts": {
     "build": "tsc -b",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "web:dev": "npm --workspace @family-media-vault/web run dev",
+    "web:build": "npm --workspace @family-media-vault/web run build"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

@@ -31,6 +31,11 @@ export interface RequestHandlerOptions {
   snapshotRetentionMax?: number;
 }
 
+function cursorStartIndex(sortedMediaIds: string[], cursor: string): number {
+  const index = sortedMediaIds.indexOf(cursor);
+  return index < 0 ? 0 : index + 1;
+}
+
 interface ToolsHealthSnapshot {
   checkedAt: number;
   tools: {
@@ -472,6 +477,140 @@ export function createRequestHandler(runtime: ServerRuntime, options: RequestHan
 
         const page = media.slice(offset, offset + limit);
         sendJson(res, 200, { media: page, total: media.length, limit, offset });
+        return;
+      }
+
+      if (method === "GET" && parts.length === 2 && parts[0] === "media" && parts[1] === "search") {
+        const sortRaw = fullUrl.searchParams.get("sort");
+        const sort = sortRaw ?? "mediaId_asc";
+        if (sort !== "mediaId_asc" && sort !== "takenAt_desc") {
+          sendJson(res, 400, { error: "invalid_sort" });
+          return;
+        }
+
+        const kindRaw = fullUrl.searchParams.get("kind");
+        const kind = kindRaw === "photo" || kindRaw === "video" || kindRaw === "unknown" ? kindRaw : undefined;
+        if (kindRaw !== null && !kind) {
+          sendJson(res, 400, { error: "invalid_kind_filter" });
+          return;
+        }
+
+        const mimeTypeRaw = fullUrl.searchParams.get("mimeType");
+        const mimeType = mimeTypeRaw?.trim() ? mimeTypeRaw : undefined;
+        if (mimeTypeRaw !== null && !mimeType) {
+          sendJson(res, 400, { error: "invalid_mime_type_filter" });
+          return;
+        }
+
+        const sourceIdRaw = fullUrl.searchParams.get("sourceId");
+        const sourceId = sourceIdRaw?.trim() ? asSourceId(sourceIdRaw) : undefined;
+        if (sourceIdRaw !== null && !sourceId) {
+          sendJson(res, 400, { error: "invalid_source_id_filter" });
+          return;
+        }
+
+        const duplicateLevelRaw = fullUrl.searchParams.get("duplicateLevel");
+        const duplicateLevel =
+          duplicateLevelRaw === "exact" || duplicateLevelRaw === "strong" || duplicateLevelRaw === "probable"
+            ? duplicateLevelRaw
+            : undefined;
+        if (duplicateLevelRaw !== null && !duplicateLevel) {
+          sendJson(res, 400, { error: "invalid_duplicate_level_filter" });
+          return;
+        }
+
+        const cameraModelRaw = fullUrl.searchParams.get("cameraModel");
+        const cameraModel = cameraModelRaw?.trim() ? cameraModelRaw.trim() : undefined;
+        if (cameraModelRaw !== null && !cameraModel) {
+          sendJson(res, 400, { error: "invalid_camera_model_filter" });
+          return;
+        }
+
+        const takenDayRaw = fullUrl.searchParams.get("takenDay");
+        const takenDay = takenDayRaw?.trim() ? takenDayRaw.trim() : undefined;
+        if (takenDayRaw !== null && !takenDay) {
+          sendJson(res, 400, { error: "invalid_taken_day_filter" });
+          return;
+        }
+        if (takenDay && !/^\d{4}-\d{2}-\d{2}$/.test(takenDay)) {
+          sendJson(res, 400, { error: "invalid_taken_day_filter" });
+          return;
+        }
+
+        const gpsTileRaw = fullUrl.searchParams.get("gpsTile");
+        const gpsTile = gpsTileRaw?.trim() ? gpsTileRaw.trim() : undefined;
+        if (gpsTileRaw !== null && !gpsTile) {
+          sendJson(res, 400, { error: "invalid_gps_tile_filter" });
+          return;
+        }
+
+        if (!kind && !mimeType && !sourceId && !duplicateLevel && !cameraModel && !takenDay && !gpsTile) {
+          sendJson(res, 400, { error: "search_filter_required" });
+          return;
+        }
+
+        const parsedLimit = Number.parseInt(fullUrl.searchParams.get("limit") ?? "", 10);
+        const parsedOffset = Number.parseInt(fullUrl.searchParams.get("offset") ?? "", 10);
+        const hasOffset = fullUrl.searchParams.has("offset");
+        const cursorRaw = fullUrl.searchParams.get("cursor");
+        const cursor = cursorRaw?.trim() ? asMediaId(cursorRaw) : null;
+        if (cursorRaw !== null && !cursor) {
+          sendJson(res, 400, { error: "invalid_cursor" });
+          return;
+        }
+        if (cursor && hasOffset) {
+          sendJson(res, 400, { error: "invalid_pagination_params" });
+          return;
+        }
+
+        const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? Math.min(parsedLimit, 500) : 100;
+        const offset = Number.isFinite(parsedOffset) && parsedOffset >= 0 ? parsedOffset : 0;
+        const useCursorMode = !hasOffset;
+
+        const mediaIds = runtime.state.mediaSearch.query(
+          {
+            kind,
+            mimeType,
+            sourceId,
+            duplicateLevel,
+            cameraModel,
+            takenDay,
+            gpsTile
+          },
+          runtime.state,
+          sort
+        );
+        const cursorStart = cursor ? cursorStartIndex(mediaIds, cursor) : 0;
+        const pageMediaIds = useCursorMode
+          ? mediaIds.slice(cursorStart, cursorStart + limit)
+          : mediaIds.slice(offset, offset + limit);
+        const media = pageMediaIds
+          .map((mediaId) => runtime.state.media.get(mediaId))
+          .filter((item): item is NonNullable<typeof item> => Boolean(item));
+        const nextCursor = useCursorMode
+          ? pageMediaIds.length === limit
+            ? pageMediaIds[pageMediaIds.length - 1]
+            : null
+          : null;
+
+        sendJson(res, 200, {
+          media,
+          total: mediaIds.length,
+          limit,
+          offset,
+          sort,
+          cursor,
+          nextCursor,
+          filters: {
+            kind: kind ?? null,
+            mimeType: mimeType ?? null,
+            sourceId: sourceId ?? null,
+            duplicateLevel: duplicateLevel ?? null,
+            cameraModel: cameraModel ?? null,
+            takenDay: takenDay ?? null,
+            gpsTile: gpsTile ?? null
+          }
+        });
         return;
       }
 

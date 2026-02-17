@@ -265,6 +265,476 @@ describe("server routes", () => {
     expect(body.offset).toBe(5);
   });
 
+  it("returns media search results using indexed filters", async () => {
+    const runtime = createRuntime();
+    const sourceId = newSourceId();
+    const sourceEntryIdA = newSourceEntryId();
+    const sourceEntryIdB = newSourceEntryId();
+    const mediaIdA = newMediaId();
+    const mediaIdB = newMediaId();
+
+    runtime.state.applyEvent(
+      createEvent("SOURCE_CREATED", {
+        source: {
+          sourceId,
+          path: "C:/tmp/source",
+          recursive: true,
+          includeArchives: false,
+          excludeGlobs: [],
+          createdAt: Date.now()
+        }
+      })
+    );
+    runtime.state.applyEvent(
+      createEvent("SOURCE_ENTRY_UPSERTED", {
+        entry: {
+          sourceEntryId: sourceEntryIdA,
+          sourceId,
+          kind: "file",
+          path: "C:/tmp/source/a.jpg",
+          size: 11,
+          mtimeMs: Date.now(),
+          fingerprint: "11:1:head-a",
+          lastSeenAt: Date.now(),
+          state: "active"
+        }
+      })
+    );
+    runtime.state.applyEvent(
+      createEvent("SOURCE_ENTRY_UPSERTED", {
+        entry: {
+          sourceEntryId: sourceEntryIdB,
+          sourceId,
+          kind: "file",
+          path: "C:/tmp/source/b.jpg",
+          size: 12,
+          mtimeMs: Date.now(),
+          fingerprint: "12:1:head-b",
+          lastSeenAt: Date.now(),
+          state: "active"
+        }
+      })
+    );
+    runtime.state.applyEvent(
+      createEvent("MEDIA_IMPORTED", {
+        media: {
+          mediaId: mediaIdA,
+          sha256: "a".repeat(64),
+          size: 11,
+          sourceEntryId: sourceEntryIdA
+        }
+      })
+    );
+    runtime.state.applyEvent(
+      createEvent("MEDIA_IMPORTED", {
+        media: {
+          mediaId: mediaIdB,
+          sha256: "b".repeat(64),
+          size: 12,
+          sourceEntryId: sourceEntryIdB
+        }
+      })
+    );
+    runtime.state.applyEvent(
+      createEvent("MEDIA_METADATA_EXTRACTED", {
+        mediaId: mediaIdA,
+        sourceEntryId: sourceEntryIdA,
+        metadata: {
+          kind: "photo",
+          mimeType: "image/jpeg",
+          cameraModel: "Canon EOS R6",
+          takenAt: Date.parse("2024-01-02T10:11:12.000Z"),
+          raw: {
+            gpsLatitude: 55.751,
+            gpsLongitude: 37.617
+          }
+        }
+      })
+    );
+    runtime.state.applyEvent(
+      createEvent("MEDIA_METADATA_EXTRACTED", {
+        mediaId: mediaIdB,
+        sourceEntryId: sourceEntryIdB,
+        metadata: {
+          kind: "video",
+          mimeType: "video/mp4",
+          cameraModel: "Sony A7",
+          takenAt: Date.parse("2024-01-03T10:11:12.000Z")
+        }
+      })
+    );
+    runtime.state.applyEvent(
+      createEvent("DUPLICATE_LINK_CREATED", {
+        link: {
+          duplicateLinkId: "dup_test" as never,
+          mediaId: mediaIdA,
+          sourceEntryId: sourceEntryIdB,
+          level: "strong",
+          createdAt: Date.now(),
+          reason: "test"
+        }
+      })
+    );
+
+    const { baseUrl } = await startServer(runtime);
+    const response = await fetch(
+      `${baseUrl}/media/search?kind=photo&mimeType=image%2Fjpeg&sourceId=${encodeURIComponent(String(sourceId))}&duplicateLevel=strong&cameraModel=${encodeURIComponent("Canon EOS R6")}&takenDay=2024-01-02&gpsTile=55.7%3A37.6&limit=5&offset=0`
+    );
+    const body = (await response.json()) as {
+      media: Array<{ mediaId: string }>;
+      total: number;
+      limit: number;
+      offset: number;
+      filters: {
+        kind: string | null;
+        mimeType: string | null;
+        sourceId: string | null;
+        duplicateLevel: string | null;
+        cameraModel: string | null;
+        takenDay: string | null;
+        gpsTile: string | null;
+      };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.total).toBe(1);
+    expect(body.media).toHaveLength(1);
+    expect(body.media[0]?.mediaId).toBe(mediaIdA);
+    expect(body.limit).toBe(5);
+    expect(body.offset).toBe(0);
+    expect(body.filters.kind).toBe("photo");
+    expect(body.filters.mimeType).toBe("image/jpeg");
+    expect(body.filters.sourceId).toBe(String(sourceId));
+    expect(body.filters.duplicateLevel).toBe("strong");
+    expect(body.filters.cameraModel).toBe("Canon EOS R6");
+    expect(body.filters.takenDay).toBe("2024-01-02");
+    expect(body.filters.gpsTile).toBe("55.7:37.6");
+  });
+
+  it("returns 400 when media search is called without filters", async () => {
+    const runtime = createRuntime();
+    const { baseUrl } = await startServer(runtime);
+
+    const response = await fetch(`${baseUrl}/media/search?limit=10&offset=0`);
+    const body = (await response.json()) as { error: string };
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe("search_filter_required");
+  });
+
+  it("returns 400 for invalid duplicateLevel filter", async () => {
+    const runtime = createRuntime();
+    const { baseUrl } = await startServer(runtime);
+
+    const response = await fetch(`${baseUrl}/media/search?duplicateLevel=near`);
+    const body = (await response.json()) as { error: string };
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe("invalid_duplicate_level_filter");
+  });
+
+  it("returns 400 for invalid takenDay filter", async () => {
+    const runtime = createRuntime();
+    const { baseUrl } = await startServer(runtime);
+
+    const response = await fetch(`${baseUrl}/media/search?takenDay=20240102`);
+    const body = (await response.json()) as { error: string };
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe("invalid_taken_day_filter");
+  });
+
+  it("returns 400 for invalid gpsTile filter", async () => {
+    const runtime = createRuntime();
+    const { baseUrl } = await startServer(runtime);
+
+    const response = await fetch(`${baseUrl}/media/search?gpsTile=%20%20%20`);
+    const body = (await response.json()) as { error: string };
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe("invalid_gps_tile_filter");
+  });
+
+  it("matches cameraModel filter case-insensitively", async () => {
+    const runtime = createRuntime();
+    const sourceId = newSourceId();
+    const sourceEntryId = newSourceEntryId();
+    const mediaId = newMediaId();
+
+    runtime.state.applyEvent(
+      createEvent("SOURCE_CREATED", {
+        source: {
+          sourceId,
+          path: "C:/tmp/source",
+          recursive: true,
+          includeArchives: false,
+          excludeGlobs: [],
+          createdAt: Date.now()
+        }
+      })
+    );
+    runtime.state.applyEvent(
+      createEvent("SOURCE_ENTRY_UPSERTED", {
+        entry: {
+          sourceEntryId,
+          sourceId,
+          kind: "file",
+          path: "C:/tmp/source/a.jpg",
+          size: 11,
+          mtimeMs: Date.now(),
+          fingerprint: "11:1:head-a",
+          lastSeenAt: Date.now(),
+          state: "active"
+        }
+      })
+    );
+    runtime.state.applyEvent(
+      createEvent("MEDIA_IMPORTED", {
+        media: {
+          mediaId,
+          sha256: "a".repeat(64),
+          size: 11,
+          sourceEntryId
+        }
+      })
+    );
+    runtime.state.applyEvent(
+      createEvent("MEDIA_METADATA_EXTRACTED", {
+        mediaId,
+        sourceEntryId,
+        metadata: {
+          kind: "photo",
+          mimeType: "image/jpeg",
+          cameraModel: "Canon EOS R6"
+        }
+      })
+    );
+
+    const { baseUrl } = await startServer(runtime);
+    const response = await fetch(`${baseUrl}/media/search?cameraModel=canon%20eos%20r6`);
+    const body = (await response.json()) as {
+      media: Array<{ mediaId: string }>;
+      total: number;
+      filters: { cameraModel: string | null };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.total).toBe(1);
+    expect(body.media).toHaveLength(1);
+    expect(body.media[0]?.mediaId).toBe(mediaId);
+    expect(body.filters.cameraModel).toBe("canon eos r6");
+  });
+
+  it("supports cursor pagination for media search", async () => {
+    const runtime = createRuntime();
+    const sourceId = newSourceId();
+    const entryIds = [newSourceEntryId(), newSourceEntryId(), newSourceEntryId()];
+    const mediaIds = [newMediaId(), newMediaId(), newMediaId()];
+
+    runtime.state.applyEvent(
+      createEvent("SOURCE_CREATED", {
+        source: {
+          sourceId,
+          path: "C:/tmp/source",
+          recursive: true,
+          includeArchives: false,
+          excludeGlobs: [],
+          createdAt: Date.now()
+        }
+      })
+    );
+
+    for (let i = 0; i < entryIds.length; i += 1) {
+      const sourceEntryId = entryIds[i];
+      const mediaId = mediaIds[i];
+      if (!sourceEntryId || !mediaId) {
+        continue;
+      }
+
+      runtime.state.applyEvent(
+        createEvent("SOURCE_ENTRY_UPSERTED", {
+          entry: {
+            sourceEntryId,
+            sourceId,
+            kind: "file",
+            path: `C:/tmp/source/${i}.jpg`,
+            size: 10 + i,
+            mtimeMs: Date.now(),
+            fingerprint: `${10 + i}:1:head-${i}`,
+            lastSeenAt: Date.now(),
+            state: "active"
+          }
+        })
+      );
+      runtime.state.applyEvent(
+        createEvent("MEDIA_IMPORTED", {
+          media: {
+            mediaId,
+            sha256: `${i}`.repeat(64),
+            size: 10 + i,
+            sourceEntryId
+          }
+        })
+      );
+      runtime.state.applyEvent(
+        createEvent("MEDIA_METADATA_EXTRACTED", {
+          mediaId,
+          sourceEntryId,
+          metadata: { kind: "photo", mimeType: "image/jpeg", takenAt: 100 + i }
+        })
+      );
+    }
+
+    const { baseUrl } = await startServer(runtime);
+    const firstResponse = await fetch(`${baseUrl}/media/search?kind=photo&sort=mediaId_asc&limit=2`);
+    const firstBody = (await firstResponse.json()) as {
+      media: Array<{ mediaId: string }>;
+      total: number;
+      nextCursor: string | null;
+    };
+
+    expect(firstResponse.status).toBe(200);
+    expect(firstBody.total).toBe(3);
+    expect(firstBody.media).toHaveLength(2);
+    expect(typeof firstBody.nextCursor).toBe("string");
+
+    const secondResponse = await fetch(
+      `${baseUrl}/media/search?kind=photo&sort=mediaId_asc&limit=2&cursor=${encodeURIComponent(firstBody.nextCursor ?? "")}`
+    );
+    const secondBody = (await secondResponse.json()) as {
+      media: Array<{ mediaId: string }>;
+      total: number;
+      nextCursor: string | null;
+    };
+
+    expect(secondResponse.status).toBe(200);
+    expect(secondBody.total).toBe(3);
+    expect(secondBody.media).toHaveLength(1);
+    expect(secondBody.nextCursor).toBeNull();
+
+    const firstIds = new Set(firstBody.media.map((item) => item.mediaId));
+    for (const item of secondBody.media) {
+      expect(firstIds.has(item.mediaId)).toBe(false);
+    }
+  });
+
+  it("supports takenAt_desc sort for media search", async () => {
+    const runtime = createRuntime();
+    const sourceId = newSourceId();
+    const sourceEntryIdA = newSourceEntryId();
+    const sourceEntryIdB = newSourceEntryId();
+    const mediaIdA = newMediaId();
+    const mediaIdB = newMediaId();
+
+    runtime.state.applyEvent(
+      createEvent("SOURCE_CREATED", {
+        source: {
+          sourceId,
+          path: "C:/tmp/source",
+          recursive: true,
+          includeArchives: false,
+          excludeGlobs: [],
+          createdAt: Date.now()
+        }
+      })
+    );
+    runtime.state.applyEvent(
+      createEvent("SOURCE_ENTRY_UPSERTED", {
+        entry: {
+          sourceEntryId: sourceEntryIdA,
+          sourceId,
+          kind: "file",
+          path: "C:/tmp/source/a.jpg",
+          size: 11,
+          mtimeMs: Date.now(),
+          fingerprint: "11:1:head-a",
+          lastSeenAt: Date.now(),
+          state: "active"
+        }
+      })
+    );
+    runtime.state.applyEvent(
+      createEvent("SOURCE_ENTRY_UPSERTED", {
+        entry: {
+          sourceEntryId: sourceEntryIdB,
+          sourceId,
+          kind: "file",
+          path: "C:/tmp/source/b.jpg",
+          size: 12,
+          mtimeMs: Date.now(),
+          fingerprint: "12:1:head-b",
+          lastSeenAt: Date.now(),
+          state: "active"
+        }
+      })
+    );
+    runtime.state.applyEvent(
+      createEvent("MEDIA_IMPORTED", {
+        media: {
+          mediaId: mediaIdA,
+          sha256: "a".repeat(64),
+          size: 11,
+          sourceEntryId: sourceEntryIdA
+        }
+      })
+    );
+    runtime.state.applyEvent(
+      createEvent("MEDIA_IMPORTED", {
+        media: {
+          mediaId: mediaIdB,
+          sha256: "b".repeat(64),
+          size: 12,
+          sourceEntryId: sourceEntryIdB
+        }
+      })
+    );
+    runtime.state.applyEvent(
+      createEvent("MEDIA_METADATA_EXTRACTED", {
+        mediaId: mediaIdA,
+        sourceEntryId: sourceEntryIdA,
+        metadata: { kind: "photo", mimeType: "image/jpeg", takenAt: 10 }
+      })
+    );
+    runtime.state.applyEvent(
+      createEvent("MEDIA_METADATA_EXTRACTED", {
+        mediaId: mediaIdB,
+        sourceEntryId: sourceEntryIdB,
+        metadata: { kind: "photo", mimeType: "image/jpeg", takenAt: 20 }
+      })
+    );
+
+    const { baseUrl } = await startServer(runtime);
+    const response = await fetch(`${baseUrl}/media/search?kind=photo&sort=takenAt_desc&limit=2`);
+    const body = (await response.json()) as { media: Array<{ mediaId: string }> };
+
+    expect(response.status).toBe(200);
+    expect(body.media).toHaveLength(2);
+    expect(body.media[0]?.mediaId).toBe(mediaIdB);
+    expect(body.media[1]?.mediaId).toBe(mediaIdA);
+  });
+
+  it("returns 400 for invalid sort", async () => {
+    const runtime = createRuntime();
+    const { baseUrl } = await startServer(runtime);
+
+    const response = await fetch(`${baseUrl}/media/search?kind=photo&sort=unknown_sort`);
+    const body = (await response.json()) as { error: string };
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe("invalid_sort");
+  });
+
+  it("returns 400 when cursor and offset are passed together", async () => {
+    const runtime = createRuntime();
+    const { baseUrl } = await startServer(runtime);
+
+    const response = await fetch(`${baseUrl}/media/search?kind=photo&cursor=media_1&offset=1`);
+    const body = (await response.json()) as { error: string };
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe("invalid_pagination_params");
+  });
+
   it("returns derived_not_found when derived asset is not generated yet", async () => {
     const runtime = createRuntime();
     const sourceId = newSourceId();

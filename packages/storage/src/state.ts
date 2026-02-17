@@ -12,6 +12,18 @@ import {
   SourceId
 } from "@family-media-vault/core";
 
+export interface MediaSearchFilters {
+  kind?: "photo" | "video" | "unknown";
+  mimeType?: string;
+  sourceId?: SourceId;
+  duplicateLevel?: DuplicateLink["level"];
+  cameraModel?: string;
+  takenDay?: string;
+  gpsTile?: string;
+}
+
+export type MediaSearchSort = "mediaId_asc" | "takenAt_desc";
+
 export class SourceStore {
   private readonly sources = new Map<SourceId, Source>();
   private readonly entries = new Map<SourceEntryId, SourceEntry>();
@@ -423,6 +435,245 @@ export class QuarantineStore {
   }
 }
 
+export class MediaSearchIndexStore {
+  private readonly kindIndex = new Map<string, Set<MediaId>>();
+  private readonly mimeTypeIndex = new Map<string, Set<MediaId>>();
+  private readonly sourceIdIndex = new Map<SourceId, Set<MediaId>>();
+  private readonly duplicateLevelIndex = new Map<DuplicateLink["level"], Set<MediaId>>();
+  private readonly cameraModelIndex = new Map<string, Set<MediaId>>();
+  private readonly takenDayIndex = new Map<string, Set<MediaId>>();
+  private readonly gpsTileIndex = new Map<string, Set<MediaId>>();
+  private readonly takenAtByMediaId = new Map<MediaId, number>();
+  private readonly kindByMediaId = new Map<MediaId, string>();
+  private readonly mimeTypeByMediaId = new Map<MediaId, string>();
+  private readonly sourceIdByMediaId = new Map<MediaId, SourceId>();
+  private readonly cameraModelByMediaId = new Map<MediaId, string>();
+  private readonly takenDayByMediaId = new Map<MediaId, string>();
+  private readonly gpsTileByMediaId = new Map<MediaId, string>();
+
+  applyEvent(event: DomainEvent, state: DomainState): void {
+    switch (event.type) {
+      case "MEDIA_IMPORTED": {
+        const media = event.payload.media;
+        const entry = state.sources.getEntry(media.sourceEntryId);
+        if (entry) {
+          this.setSourceId(media.mediaId, entry.sourceId);
+        }
+        return;
+      }
+      case "MEDIA_METADATA_EXTRACTED": {
+        this.setKind(event.payload.mediaId, event.payload.metadata.kind);
+        this.setMimeType(event.payload.mediaId, event.payload.metadata.mimeType);
+        this.setCameraModel(event.payload.mediaId, event.payload.metadata.cameraModel);
+        this.setTakenAt(event.payload.mediaId, event.payload.metadata.takenAt);
+        this.setTakenDay(event.payload.mediaId, event.payload.metadata.takenAt);
+        this.setGpsTile(event.payload.mediaId, extractGpsTileFromMetadata(event.payload.metadata));
+        return;
+      }
+      case "DUPLICATE_LINK_CREATED": {
+        this.addDuplicate(event.payload.link.level, event.payload.link.mediaId);
+        const linkedMedia = state.media.getBySourceEntryId(event.payload.link.sourceEntryId);
+        if (linkedMedia) {
+          this.addDuplicate(event.payload.link.level, linkedMedia.mediaId);
+        }
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  rebuild(state: DomainState): void {
+    this.kindIndex.clear();
+    this.mimeTypeIndex.clear();
+    this.sourceIdIndex.clear();
+    this.duplicateLevelIndex.clear();
+    this.cameraModelIndex.clear();
+    this.takenDayIndex.clear();
+    this.gpsTileIndex.clear();
+    this.takenAtByMediaId.clear();
+    this.kindByMediaId.clear();
+    this.mimeTypeByMediaId.clear();
+    this.sourceIdByMediaId.clear();
+    this.cameraModelByMediaId.clear();
+    this.takenDayByMediaId.clear();
+    this.gpsTileByMediaId.clear();
+
+    for (const media of state.media.list()) {
+      const entry = state.sources.getEntry(media.sourceEntryId);
+      if (entry) {
+        this.setSourceId(media.mediaId, entry.sourceId);
+      }
+    }
+    for (const { mediaId, metadata } of state.metadata.list()) {
+      this.setKind(mediaId, metadata.kind);
+      this.setMimeType(mediaId, metadata.mimeType);
+      this.setCameraModel(mediaId, metadata.cameraModel);
+      this.setTakenAt(mediaId, metadata.takenAt);
+      this.setTakenDay(mediaId, metadata.takenAt);
+      this.setGpsTile(mediaId, extractGpsTileFromMetadata(metadata));
+    }
+    for (const link of state.duplicateLinks.list()) {
+      this.addDuplicate(link.level, link.mediaId);
+      const linkedMedia = state.media.getBySourceEntryId(link.sourceEntryId);
+      if (linkedMedia) {
+        this.addDuplicate(link.level, linkedMedia.mediaId);
+      }
+    }
+  }
+
+  query(filters: MediaSearchFilters, state: DomainState, sort: MediaSearchSort = "mediaId_asc"): MediaId[] {
+    const candidateSets: Set<MediaId>[] = [];
+
+    if (filters.kind) {
+      candidateSets.push(new Set(this.kindIndex.get(filters.kind) ?? []));
+    }
+    if (filters.mimeType) {
+      const normalized = normalizeMimeType(filters.mimeType);
+      candidateSets.push(new Set(this.mimeTypeIndex.get(normalized) ?? []));
+    }
+    if (filters.sourceId) {
+      candidateSets.push(new Set(this.sourceIdIndex.get(filters.sourceId) ?? []));
+    }
+    if (filters.duplicateLevel) {
+      candidateSets.push(new Set(this.duplicateLevelIndex.get(filters.duplicateLevel) ?? []));
+    }
+    if (filters.cameraModel) {
+      const normalized = normalizeSearchToken(filters.cameraModel);
+      candidateSets.push(new Set(this.cameraModelIndex.get(normalized) ?? []));
+    }
+    if (filters.takenDay) {
+      const normalized = normalizeTakenDay(filters.takenDay);
+      candidateSets.push(new Set(this.takenDayIndex.get(normalized) ?? []));
+    }
+    if (filters.gpsTile) {
+      const normalized = normalizeGpsTile(filters.gpsTile);
+      candidateSets.push(new Set(this.gpsTileIndex.get(normalized) ?? []));
+    }
+
+    if (candidateSets.length === 0) {
+      return sortMediaIds(
+        state.media
+          .list()
+          .map((item) => item.mediaId),
+        sort,
+        this.takenAtByMediaId
+      );
+    }
+
+    candidateSets.sort((a, b) => a.size - b.size);
+    const [first, ...rest] = candidateSets;
+    if (!first) {
+      return [];
+    }
+
+    const result = new Set(first);
+    for (const next of rest) {
+      for (const mediaId of Array.from(result)) {
+        if (!next.has(mediaId)) {
+          result.delete(mediaId);
+        }
+      }
+      if (result.size === 0) {
+        return [];
+      }
+    }
+
+    return sortMediaIds(Array.from(result), sort, this.takenAtByMediaId);
+  }
+
+  private setKind(mediaId: MediaId, kind: string | undefined): void {
+    const previous = this.kindByMediaId.get(mediaId);
+    if (previous) {
+      removeFromIndex(this.kindIndex, previous, mediaId);
+      this.kindByMediaId.delete(mediaId);
+    }
+    if (!kind) {
+      return;
+    }
+    this.kindByMediaId.set(mediaId, kind);
+    addToIndex(this.kindIndex, kind, mediaId);
+  }
+
+  private setMimeType(mediaId: MediaId, mimeType: string | undefined): void {
+    const previous = this.mimeTypeByMediaId.get(mediaId);
+    if (previous) {
+      removeFromIndex(this.mimeTypeIndex, previous, mediaId);
+      this.mimeTypeByMediaId.delete(mediaId);
+    }
+    const normalized = normalizeMimeType(mimeType);
+    if (!normalized) {
+      return;
+    }
+    this.mimeTypeByMediaId.set(mediaId, normalized);
+    addToIndex(this.mimeTypeIndex, normalized, mediaId);
+  }
+
+  private setSourceId(mediaId: MediaId, sourceId: SourceId): void {
+    const previous = this.sourceIdByMediaId.get(mediaId);
+    if (previous) {
+      removeFromIndex(this.sourceIdIndex, previous, mediaId);
+      this.sourceIdByMediaId.delete(mediaId);
+    }
+    this.sourceIdByMediaId.set(mediaId, sourceId);
+    addToIndex(this.sourceIdIndex, sourceId, mediaId);
+  }
+
+  private setCameraModel(mediaId: MediaId, cameraModel: string | undefined): void {
+    const previous = this.cameraModelByMediaId.get(mediaId);
+    if (previous) {
+      removeFromIndex(this.cameraModelIndex, previous, mediaId);
+      this.cameraModelByMediaId.delete(mediaId);
+    }
+    const normalized = normalizeSearchToken(cameraModel);
+    if (!normalized) {
+      return;
+    }
+    this.cameraModelByMediaId.set(mediaId, normalized);
+    addToIndex(this.cameraModelIndex, normalized, mediaId);
+  }
+
+  private setTakenAt(mediaId: MediaId, takenAt: number | undefined): void {
+    if (typeof takenAt === "number" && Number.isFinite(takenAt)) {
+      this.takenAtByMediaId.set(mediaId, takenAt);
+      return;
+    }
+    this.takenAtByMediaId.delete(mediaId);
+  }
+
+  private setTakenDay(mediaId: MediaId, takenAt: number | undefined): void {
+    const previous = this.takenDayByMediaId.get(mediaId);
+    if (previous) {
+      removeFromIndex(this.takenDayIndex, previous, mediaId);
+      this.takenDayByMediaId.delete(mediaId);
+    }
+    const day = takenDayFromTimestamp(takenAt);
+    if (!day) {
+      return;
+    }
+    this.takenDayByMediaId.set(mediaId, day);
+    addToIndex(this.takenDayIndex, day, mediaId);
+  }
+
+  private setGpsTile(mediaId: MediaId, gpsTile: string | undefined): void {
+    const previous = this.gpsTileByMediaId.get(mediaId);
+    if (previous) {
+      removeFromIndex(this.gpsTileIndex, previous, mediaId);
+      this.gpsTileByMediaId.delete(mediaId);
+    }
+    const normalized = normalizeGpsTile(gpsTile);
+    if (!normalized) {
+      return;
+    }
+    this.gpsTileByMediaId.set(mediaId, normalized);
+    addToIndex(this.gpsTileIndex, normalized, mediaId);
+  }
+
+  private addDuplicate(level: DuplicateLink["level"], mediaId: MediaId): void {
+    addToIndex(this.duplicateLevelIndex, level, mediaId);
+  }
+}
+
 export class DomainState {
   readonly sources = new SourceStore();
   readonly media = new MediaStore();
@@ -430,6 +681,7 @@ export class DomainState {
   readonly metadata = new MediaMetadataStore();
   readonly duplicateLinks = new DuplicateLinkStore();
   readonly quarantine = new QuarantineStore();
+  readonly mediaSearch = new MediaSearchIndexStore();
 
   applyEvent(event: DomainEvent): void {
     this.sources.applyEvent(event);
@@ -438,6 +690,11 @@ export class DomainState {
     this.metadata.applyEvent(event);
     this.duplicateLinks.applyEvent(event);
     this.quarantine.applyEvent(event);
+    this.mediaSearch.applyEvent(event, this);
+  }
+
+  rebuildIndexes(): void {
+    this.mediaSearch.rebuild(this);
   }
 }
 
@@ -467,6 +724,135 @@ function duplicateLinkKey(
   level: DuplicateLink["level"]
 ): string {
   return `${mediaId}:${sourceEntryId}:${level}`;
+}
+
+function addToIndex<TKey>(index: Map<TKey, Set<MediaId>>, key: TKey, mediaId: MediaId): void {
+  const bucket = index.get(key) ?? new Set<MediaId>();
+  bucket.add(mediaId);
+  index.set(key, bucket);
+}
+
+function removeFromIndex<TKey>(index: Map<TKey, Set<MediaId>>, key: TKey, mediaId: MediaId): void {
+  const bucket = index.get(key);
+  if (!bucket) {
+    return;
+  }
+  bucket.delete(mediaId);
+  if (bucket.size === 0) {
+    index.delete(key);
+  }
+}
+
+function normalizeMimeType(mimeType: string | undefined): string {
+  if (typeof mimeType !== "string") {
+    return "";
+  }
+  return mimeType.trim().toLowerCase();
+}
+
+function normalizeSearchToken(value: string | undefined): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+  return value.trim().toLowerCase();
+}
+
+function takenDayFromTimestamp(takenAt: number | undefined): string | undefined {
+  if (typeof takenAt !== "number" || !Number.isFinite(takenAt)) {
+    return undefined;
+  }
+  return new Date(takenAt).toISOString().slice(0, 10);
+}
+
+function normalizeTakenDay(value: string | undefined): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+  const normalized = value.trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : "";
+}
+
+function normalizeGpsTile(value: string | undefined): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+  return value.trim().toLowerCase();
+}
+
+function toFiniteNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return undefined;
+}
+
+function gpsTileFromCoordinates(lat: number, lon: number): string {
+  const latBucket = Math.floor(lat * 10) / 10;
+  const lonBucket = Math.floor(lon * 10) / 10;
+  return `${latBucket.toFixed(1)}:${lonBucket.toFixed(1)}`;
+}
+
+function extractGpsTileFromMetadata(metadata: MediaMetadata): string | undefined {
+  const raw = metadata.raw;
+  if (!raw || typeof raw !== "object") {
+    return undefined;
+  }
+
+  const gpsTile = raw.gpsTile;
+  if (typeof gpsTile === "string" && gpsTile.trim()) {
+    return normalizeGpsTile(gpsTile);
+  }
+
+  const lat =
+    toFiniteNumber(raw.gpsLatitude) ??
+    toFiniteNumber(raw.GPSLatitude) ??
+    toFiniteNumber(raw.latitude) ??
+    toFiniteNumber(raw.lat);
+  const lon =
+    toFiniteNumber(raw.gpsLongitude) ??
+    toFiniteNumber(raw.GPSLongitude) ??
+    toFiniteNumber(raw.longitude) ??
+    toFiniteNumber(raw.lon);
+
+  if (lat === undefined || lon === undefined) {
+    return undefined;
+  }
+  return gpsTileFromCoordinates(lat, lon);
+}
+
+function sortMediaIds(
+  mediaIds: MediaId[],
+  sort: MediaSearchSort,
+  takenAtByMediaId: Map<MediaId, number>
+): MediaId[] {
+  if (sort === "takenAt_desc") {
+    return mediaIds.sort((left, right) => {
+      const leftTakenAt = takenAtByMediaId.get(left);
+      const rightTakenAt = takenAtByMediaId.get(right);
+
+      if (typeof leftTakenAt === "number" && typeof rightTakenAt === "number") {
+        if (rightTakenAt !== leftTakenAt) {
+          return rightTakenAt - leftTakenAt;
+        }
+        return left.localeCompare(right);
+      }
+      if (typeof leftTakenAt === "number") {
+        return -1;
+      }
+      if (typeof rightTakenAt === "number") {
+        return 1;
+      }
+      return left.localeCompare(right);
+    });
+  }
+
+  return mediaIds.sort((left, right) => left.localeCompare(right));
 }
 
 function normalizePerceptualHash(value: unknown): string | undefined {

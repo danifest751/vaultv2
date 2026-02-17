@@ -10,6 +10,7 @@ export async function startServer(config: ServerConfig): Promise<http.Server> {
     vaultDir: config.vaultDir,
     derivedDir: config.derivedDir,
     hmacSecret: config.hmacSecret,
+    derivedGenerateMaxAttempts: config.derivedGenerateMaxAttempts,
     dedupStrongDistanceThreshold: config.dedupStrongDistanceThreshold,
     dedupProbableDistanceThreshold: config.dedupProbableDistanceThreshold
   });

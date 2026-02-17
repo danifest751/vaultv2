@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -200,5 +200,189 @@ describe("metadata + derived jobs", () => {
     expect(runCount).toBe(1);
     const file = await readFile(outputPath, "utf8");
     expect(file).toBe("derived");
+  });
+
+  it("cleans temporary file when derived generation fails", async () => {
+    const baseDir = await mkdtemp(path.join(tmpdir(), "fmv-derived-fail-"));
+    const sourceDir = path.join(baseDir, "source");
+    const vaultDir = path.join(baseDir, "vault");
+    const derivedDir = path.join(baseDir, "derived");
+
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(path.join(sourceDir, "a.jpg"), "image-data");
+
+    const state = new DomainState();
+    const sourceId = newSourceId();
+    const sourceEntryId = newSourceEntryId();
+    const mediaId = newMediaId();
+    const sourcePath = path.join(sourceDir, "a.jpg");
+
+    state.applyEvent(
+      createEvent("SOURCE_CREATED", {
+        source: {
+          sourceId,
+          path: sourceDir,
+          recursive: true,
+          includeArchives: false,
+          excludeGlobs: [],
+          createdAt: Date.now()
+        }
+      })
+    );
+    state.applyEvent(
+      createEvent("SOURCE_ENTRY_UPSERTED", {
+        entry: {
+          sourceEntryId,
+          sourceId,
+          kind: "file",
+          path: sourcePath,
+          size: 9,
+          mtimeMs: Date.now(),
+          fingerprint: "9:1:head",
+          lastSeenAt: Date.now(),
+          state: "active"
+        }
+      })
+    );
+
+    const sha256 = "c".repeat(64);
+    await ensureMediaStored({ root: vaultDir }, sourcePath, sha256);
+
+    state.applyEvent(
+      createEvent("MEDIA_IMPORTED", {
+        media: {
+          mediaId,
+          sha256,
+          size: 9,
+          sourceEntryId
+        }
+      })
+    );
+    state.applyEvent(
+      createEvent("MEDIA_METADATA_EXTRACTED", {
+        mediaId,
+        sourceEntryId,
+        metadata: {
+          kind: "photo",
+          mimeType: "image/jpeg"
+        }
+      })
+    );
+
+    const vault: VaultLayout = { root: vaultDir };
+    const derived: DerivedLayout = { root: derivedDir };
+
+    const handler = createDerivedGenerateJobHandler({
+      state,
+      vault,
+      derived,
+      commandRunner: {
+        run: async (_command, args) => {
+          const outputPath = args[args.length - 1];
+          await mkdir(path.dirname(outputPath), { recursive: true });
+          await writeFile(outputPath, "tmp-partial");
+          throw new Error("ffmpeg_failed");
+        }
+      }
+    });
+
+    await expect(handler({ payload: { mediaId, kind: "thumb" } })).rejects.toThrow("ffmpeg_failed");
+
+    const finalPath = derivedPathForMedia(derived, mediaId, "thumb");
+    const fileNames = await readdir(path.dirname(finalPath));
+    expect(fileNames.some((name) => name.includes(".tmp-"))).toBe(false);
+  });
+
+  it("treats concurrent winner as idempotent success and keeps final file", async () => {
+    const baseDir = await mkdtemp(path.join(tmpdir(), "fmv-derived-race-"));
+    const sourceDir = path.join(baseDir, "source");
+    const vaultDir = path.join(baseDir, "vault");
+    const derivedDir = path.join(baseDir, "derived");
+
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(path.join(sourceDir, "a.jpg"), "image-data");
+
+    const state = new DomainState();
+    const sourceId = newSourceId();
+    const sourceEntryId = newSourceEntryId();
+    const mediaId = newMediaId();
+    const sourcePath = path.join(sourceDir, "a.jpg");
+
+    state.applyEvent(
+      createEvent("SOURCE_CREATED", {
+        source: {
+          sourceId,
+          path: sourceDir,
+          recursive: true,
+          includeArchives: false,
+          excludeGlobs: [],
+          createdAt: Date.now()
+        }
+      })
+    );
+    state.applyEvent(
+      createEvent("SOURCE_ENTRY_UPSERTED", {
+        entry: {
+          sourceEntryId,
+          sourceId,
+          kind: "file",
+          path: sourcePath,
+          size: 9,
+          mtimeMs: Date.now(),
+          fingerprint: "9:1:head",
+          lastSeenAt: Date.now(),
+          state: "active"
+        }
+      })
+    );
+
+    const sha256 = "d".repeat(64);
+    await ensureMediaStored({ root: vaultDir }, sourcePath, sha256);
+
+    state.applyEvent(
+      createEvent("MEDIA_IMPORTED", {
+        media: {
+          mediaId,
+          sha256,
+          size: 9,
+          sourceEntryId
+        }
+      })
+    );
+    state.applyEvent(
+      createEvent("MEDIA_METADATA_EXTRACTED", {
+        mediaId,
+        sourceEntryId,
+        metadata: {
+          kind: "photo",
+          mimeType: "image/jpeg"
+        }
+      })
+    );
+
+    const vault: VaultLayout = { root: vaultDir };
+    const derived: DerivedLayout = { root: derivedDir };
+    const finalPath = derivedPathForMedia(derived, mediaId, "thumb");
+
+    const handler = createDerivedGenerateJobHandler({
+      state,
+      vault,
+      derived,
+      commandRunner: {
+        run: async (_command, args) => {
+          const tempPath = args[args.length - 1];
+          await mkdir(path.dirname(tempPath), { recursive: true });
+          await writeFile(tempPath, "temp-content");
+          await writeFile(finalPath, "winner-content");
+          return { stdout: "", stderr: "" };
+        }
+      }
+    });
+
+    await expect(handler({ payload: { mediaId, kind: "thumb" } })).resolves.toBeUndefined();
+    const content = await readFile(finalPath, "utf8");
+    expect(content).toBe("winner-content");
+    const fileNames = await readdir(path.dirname(finalPath));
+    expect(fileNames.some((name) => name.includes(".tmp-"))).toBe(false);
   });
 });

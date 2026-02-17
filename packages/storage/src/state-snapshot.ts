@@ -56,6 +56,7 @@ export async function rebuildDomainStateFromSnapshot(
       applySnapshotRecord(state, record);
     }
   }
+  state.rebuildIndexes();
   return state;
 }
 

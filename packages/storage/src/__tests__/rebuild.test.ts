@@ -96,7 +96,13 @@ describe("rebuildDomainState", () => {
       sourceEntryId: entryId,
       metadata: {
         kind: "photo",
-        raw: { perceptualHash: "abcdefff00000000" }
+        cameraModel: "Canon EOS R6",
+        takenAt: Date.parse("2024-01-02T10:11:12.000Z"),
+        raw: {
+          perceptualHash: "abcdefff00000000",
+          gpsLatitude: 55.751,
+          gpsLongitude: 37.617
+        }
       }
     });
 
@@ -114,6 +120,8 @@ describe("rebuildDomainState", () => {
       sourceEntryId: entryIdB,
       metadata: {
         kind: "photo",
+        cameraModel: "Sony A7",
+        takenAt: Date.parse("2024-01-03T10:11:12.000Z"),
         raw: { perceptualHash: "abcdefff000000ff" }
       }
     });
@@ -136,5 +144,10 @@ describe("rebuildDomainState", () => {
     expect(new Set(rebuilt.metadata.listMediaIdsByPerceptualHashPrefix("abcdefff00000000"))).toEqual(
       new Set([mediaId, mediaIdB])
     );
+    expect(new Set(rebuilt.mediaSearch.query({ kind: "photo" }, rebuilt))).toEqual(new Set([mediaId, mediaIdB]));
+    expect(new Set(rebuilt.mediaSearch.query({ sourceId }, rebuilt))).toEqual(new Set([mediaId, mediaIdB]));
+    expect(new Set(rebuilt.mediaSearch.query({ cameraModel: "canon eos r6" }, rebuilt))).toEqual(new Set([mediaId]));
+    expect(new Set(rebuilt.mediaSearch.query({ takenDay: "2024-01-02" }, rebuilt))).toEqual(new Set([mediaId]));
+    expect(new Set(rebuilt.mediaSearch.query({ gpsTile: "55.7:37.6" }, rebuilt))).toEqual(new Set([mediaId]));
   });
 });

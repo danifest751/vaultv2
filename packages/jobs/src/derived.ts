@@ -61,13 +61,33 @@ export function createDerivedGenerateJobHandler(options: DerivedGenerateJobHandl
     const metadata = options.state.metadata.get(mediaId);
     const mimeType = metadata?.mimeType ?? "";
 
-    if (kind === "thumb") {
-      await generateThumb(sourcePath, outputPath, mimeType, commandRunner);
-      return;
-    }
+    const tempPath = createTempOutputPath(outputPath);
+    try {
+      if (kind === "thumb") {
+        await generateThumb(sourcePath, tempPath, mimeType, commandRunner);
+      } else {
+        await generatePoster(sourcePath, tempPath, commandRunner);
+      }
 
-    await generatePoster(sourcePath, outputPath, commandRunner);
+      if (await fileExists(outputPath)) {
+        await safeUnlink(tempPath);
+        return;
+      }
+
+      await fs.rename(tempPath, outputPath);
+    } catch (error) {
+      await safeUnlink(tempPath);
+      if (await fileExists(outputPath)) {
+        return;
+      }
+      throw error;
+    }
   };
+}
+
+function createTempOutputPath(outputPath: string): string {
+  const unique = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `${outputPath}.tmp-${unique}`;
 }
 
 async function generateThumb(
@@ -118,5 +138,13 @@ async function fileExists(targetPath: string): Promise<boolean> {
     return stat.isFile();
   } catch {
     return false;
+  }
+}
+
+async function safeUnlink(targetPath: string): Promise<void> {
+  try {
+    await fs.unlink(targetPath);
+  } catch {
+    return;
   }
 }

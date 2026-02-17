@@ -90,8 +90,14 @@ describe("state snapshot", () => {
       metadata: {
         kind: "photo",
         takenAt: 2,
+        cameraModel: "Canon EOS R6",
         mimeType: "image/jpeg",
-        raw: { ext: ".jpg", perceptualHash: "abcdefff00000000" }
+        raw: {
+          ext: ".jpg",
+          perceptualHash: "abcdefff00000000",
+          gpsLatitude: 55.751,
+          gpsLongitude: 37.617
+        }
       }
     });
 
@@ -154,13 +160,25 @@ describe("state snapshot", () => {
     expect(rebuilt.metadata.get(mediaId)).toEqual({
       kind: "photo",
       takenAt: 2,
+      cameraModel: "Canon EOS R6",
       mimeType: "image/jpeg",
-      raw: { ext: ".jpg", perceptualHash: "abcdefff00000000" }
+      raw: {
+        ext: ".jpg",
+        perceptualHash: "abcdefff00000000",
+        gpsLatitude: 55.751,
+        gpsLongitude: 37.617
+      }
     });
     expect(rebuilt.metadata.getPerceptualHash(mediaId)).toBe("abcdefff00000000");
     expect(new Set(rebuilt.metadata.listMediaIdsByPerceptualHashPrefix("abcdefff00000000"))).toEqual(
       new Set([mediaId])
     );
+    expect(new Set(rebuilt.mediaSearch.query({ kind: "photo" }, rebuilt))).toEqual(new Set([mediaId]));
+    expect(new Set(rebuilt.mediaSearch.query({ sourceId }, rebuilt))).toEqual(new Set([mediaId]));
+    expect(new Set(rebuilt.mediaSearch.query({ duplicateLevel: "probable" }, rebuilt))).toEqual(new Set([mediaId]));
+    expect(new Set(rebuilt.mediaSearch.query({ cameraModel: "canon eos r6" }, rebuilt))).toEqual(new Set([mediaId]));
+    expect(new Set(rebuilt.mediaSearch.query({ takenDay: "1970-01-01" }, rebuilt))).toEqual(new Set([mediaId]));
+    expect(new Set(rebuilt.mediaSearch.query({ gpsTile: "55.7:37.6" }, rebuilt))).toEqual(new Set([mediaId]));
     const rebuiltQuarantine = rebuilt.quarantine.get(quarantineId);
     expect(rebuiltQuarantine?.status).toBe("accepted");
     expect(rebuiltQuarantine?.acceptedMediaId).toBe(mediaId);

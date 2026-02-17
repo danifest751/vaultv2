@@ -10,6 +10,7 @@ export interface ServerConfig {
   hmacSecret: string;
   authToken: string;
   sourcePathAllowlistRoots: string[];
+  derivedGenerateMaxAttempts: number;
   dedupStrongDistanceThreshold: number;
   dedupProbableDistanceThreshold: number;
 }
@@ -35,6 +36,7 @@ export function loadServerConfig(env: NodeJS.ProcessEnv): ServerConfig {
     .split(path.delimiter)
     .map((value) => value.trim())
     .filter((value) => value.length > 0);
+  const derivedGenerateMaxAttempts = normalizePositiveInt(env.DERIVED_GENERATE_MAX_ATTEMPTS, 2);
   const dedupStrongDistanceThreshold = normalizeNonNegativeInt(env.DEDUP_STRONG_DISTANCE_THRESHOLD, 4);
   const dedupProbableDistanceThreshold = normalizeNonNegativeInt(env.DEDUP_PROBABLE_DISTANCE_THRESHOLD, 10);
 
@@ -48,9 +50,18 @@ export function loadServerConfig(env: NodeJS.ProcessEnv): ServerConfig {
     hmacSecret,
     authToken,
     sourcePathAllowlistRoots,
+    derivedGenerateMaxAttempts,
     dedupStrongDistanceThreshold,
     dedupProbableDistanceThreshold
   };
+}
+
+function normalizePositiveInt(raw: string | undefined, fallback: number): number {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.max(1, Math.floor(parsed));
 }
 
 function normalizeNonNegativeInt(raw: string | undefined, fallback: number): number {
