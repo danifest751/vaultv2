@@ -10,6 +10,10 @@ export interface ServerConfig {
   hmacSecret: string;
   authToken: string;
   sourcePathAllowlistRoots: string[];
+  jobConcurrencyTotal: number;
+  jobConcurrencyIo: number;
+  jobConcurrencyCpu: number;
+  jobConcurrencyControl: number;
   derivedGenerateMaxAttempts: number;
   dedupStrongDistanceThreshold: number;
   dedupProbableDistanceThreshold: number;
@@ -36,6 +40,10 @@ export function loadServerConfig(env: NodeJS.ProcessEnv): ServerConfig {
     .split(path.delimiter)
     .map((value) => value.trim())
     .filter((value) => value.length > 0);
+  const jobConcurrencyTotal = normalizePositiveInt(env.JOB_CONCURRENCY_TOTAL, 4);
+  const jobConcurrencyIo = normalizePositiveInt(env.JOB_CONCURRENCY_IO, 2);
+  const jobConcurrencyCpu = normalizePositiveInt(env.JOB_CONCURRENCY_CPU, 2);
+  const jobConcurrencyControl = normalizePositiveInt(env.JOB_CONCURRENCY_CONTROL, 1);
   const derivedGenerateMaxAttempts = normalizePositiveInt(env.DERIVED_GENERATE_MAX_ATTEMPTS, 2);
   const dedupStrongDistanceThreshold = normalizeNonNegativeInt(env.DEDUP_STRONG_DISTANCE_THRESHOLD, 4);
   const dedupProbableDistanceThreshold = normalizeNonNegativeInt(env.DEDUP_PROBABLE_DISTANCE_THRESHOLD, 10);
@@ -50,6 +58,10 @@ export function loadServerConfig(env: NodeJS.ProcessEnv): ServerConfig {
     hmacSecret,
     authToken,
     sourcePathAllowlistRoots,
+    jobConcurrencyTotal,
+    jobConcurrencyIo,
+    jobConcurrencyCpu,
+    jobConcurrencyControl,
     derivedGenerateMaxAttempts,
     dedupStrongDistanceThreshold,
     dedupProbableDistanceThreshold

@@ -73,7 +73,7 @@ describe("state snapshot", () => {
     const mediaImported = createEvent("MEDIA_IMPORTED", {
       media: {
         mediaId,
-        sha256: "sha256-a",
+        sha256: "ab".repeat(32),
         size: 10,
         sourceEntryId: entryIdA
       }
@@ -179,6 +179,7 @@ describe("state snapshot", () => {
     expect(new Set(rebuilt.mediaSearch.query({ cameraModel: "canon eos r6" }, rebuilt))).toEqual(new Set([mediaId]));
     expect(new Set(rebuilt.mediaSearch.query({ takenDay: "1970-01-01" }, rebuilt))).toEqual(new Set([mediaId]));
     expect(new Set(rebuilt.mediaSearch.query({ gpsTile: "55.7:37.6" }, rebuilt))).toEqual(new Set([mediaId]));
+    expect(new Set(rebuilt.mediaSearch.query({ sha256Prefix: "ABAB" }, rebuilt))).toEqual(new Set([mediaId]));
     const rebuiltQuarantine = rebuilt.quarantine.get(quarantineId);
     expect(rebuiltQuarantine?.status).toBe("accepted");
     expect(rebuiltQuarantine?.acceptedMediaId).toBe(mediaId);

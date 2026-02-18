@@ -20,9 +20,12 @@ export interface MediaSearchFilters {
   cameraModel?: string;
   takenDay?: string;
   gpsTile?: string;
+  sha256Prefix?: string;
 }
 
 export type MediaSearchSort = "mediaId_asc" | "takenAt_desc";
+
+const EMPTY_MEDIA_ID_SET: ReadonlySet<MediaId> = new Set<MediaId>();
 
 export class SourceStore {
   private readonly sources = new Map<SourceId, Source>();
@@ -443,7 +446,12 @@ export class MediaSearchIndexStore {
   private readonly cameraModelIndex = new Map<string, Set<MediaId>>();
   private readonly takenDayIndex = new Map<string, Set<MediaId>>();
   private readonly gpsTileIndex = new Map<string, Set<MediaId>>();
+  private readonly sha256ExactIndex = new Map<string, Set<MediaId>>();
+  private readonly sha256Prefix2Index = new Map<string, Set<MediaId>>();
+  private readonly sha256Prefix4Index = new Map<string, Set<MediaId>>();
+  private readonly sha256Prefix8Index = new Map<string, Set<MediaId>>();
   private readonly takenAtByMediaId = new Map<MediaId, number>();
+  private readonly sha256ByMediaId = new Map<MediaId, string>();
   private readonly kindByMediaId = new Map<MediaId, string>();
   private readonly mimeTypeByMediaId = new Map<MediaId, string>();
   private readonly sourceIdByMediaId = new Map<MediaId, SourceId>();
@@ -459,6 +467,7 @@ export class MediaSearchIndexStore {
         if (entry) {
           this.setSourceId(media.mediaId, entry.sourceId);
         }
+        this.setSha256(media.mediaId, media.sha256);
         return;
       }
       case "MEDIA_METADATA_EXTRACTED": {
@@ -491,7 +500,12 @@ export class MediaSearchIndexStore {
     this.cameraModelIndex.clear();
     this.takenDayIndex.clear();
     this.gpsTileIndex.clear();
+    this.sha256ExactIndex.clear();
+    this.sha256Prefix2Index.clear();
+    this.sha256Prefix4Index.clear();
+    this.sha256Prefix8Index.clear();
     this.takenAtByMediaId.clear();
+    this.sha256ByMediaId.clear();
     this.kindByMediaId.clear();
     this.mimeTypeByMediaId.clear();
     this.sourceIdByMediaId.clear();
@@ -504,6 +518,7 @@ export class MediaSearchIndexStore {
       if (entry) {
         this.setSourceId(media.mediaId, entry.sourceId);
       }
+      this.setSha256(media.mediaId, media.sha256);
     }
     for (const { mediaId, metadata } of state.metadata.list()) {
       this.setKind(mediaId, metadata.kind);
@@ -523,32 +538,36 @@ export class MediaSearchIndexStore {
   }
 
   query(filters: MediaSearchFilters, state: DomainState, sort: MediaSearchSort = "mediaId_asc"): MediaId[] {
-    const candidateSets: Set<MediaId>[] = [];
+    const candidateSets: Array<ReadonlySet<MediaId>> = [];
 
     if (filters.kind) {
-      candidateSets.push(new Set(this.kindIndex.get(filters.kind) ?? []));
+      candidateSets.push(this.kindIndex.get(filters.kind) ?? EMPTY_MEDIA_ID_SET);
     }
     if (filters.mimeType) {
       const normalized = normalizeMimeType(filters.mimeType);
-      candidateSets.push(new Set(this.mimeTypeIndex.get(normalized) ?? []));
+      candidateSets.push(this.mimeTypeIndex.get(normalized) ?? EMPTY_MEDIA_ID_SET);
     }
     if (filters.sourceId) {
-      candidateSets.push(new Set(this.sourceIdIndex.get(filters.sourceId) ?? []));
+      candidateSets.push(this.sourceIdIndex.get(filters.sourceId) ?? EMPTY_MEDIA_ID_SET);
     }
     if (filters.duplicateLevel) {
-      candidateSets.push(new Set(this.duplicateLevelIndex.get(filters.duplicateLevel) ?? []));
+      candidateSets.push(this.duplicateLevelIndex.get(filters.duplicateLevel) ?? EMPTY_MEDIA_ID_SET);
     }
     if (filters.cameraModel) {
       const normalized = normalizeSearchToken(filters.cameraModel);
-      candidateSets.push(new Set(this.cameraModelIndex.get(normalized) ?? []));
+      candidateSets.push(this.cameraModelIndex.get(normalized) ?? EMPTY_MEDIA_ID_SET);
     }
     if (filters.takenDay) {
       const normalized = normalizeTakenDay(filters.takenDay);
-      candidateSets.push(new Set(this.takenDayIndex.get(normalized) ?? []));
+      candidateSets.push(this.takenDayIndex.get(normalized) ?? EMPTY_MEDIA_ID_SET);
     }
     if (filters.gpsTile) {
       const normalized = normalizeGpsTile(filters.gpsTile);
-      candidateSets.push(new Set(this.gpsTileIndex.get(normalized) ?? []));
+      candidateSets.push(this.gpsTileIndex.get(normalized) ?? EMPTY_MEDIA_ID_SET);
+    }
+    if (filters.sha256Prefix) {
+      const normalized = normalizeSha256Prefix(filters.sha256Prefix);
+      candidateSets.push(this.collectBySha256Prefix(normalized));
     }
 
     if (candidateSets.length === 0) {
@@ -563,23 +582,32 @@ export class MediaSearchIndexStore {
 
     candidateSets.sort((a, b) => a.size - b.size);
     const [first, ...rest] = candidateSets;
-    if (!first) {
+    if (!first || first.size === 0) {
       return [];
     }
 
-    const result = new Set(first);
-    for (const next of rest) {
-      for (const mediaId of Array.from(result)) {
+    const result: MediaId[] = [];
+    outer: for (const mediaId of first) {
+      for (const next of rest) {
         if (!next.has(mediaId)) {
-          result.delete(mediaId);
+          continue outer;
         }
       }
-      if (result.size === 0) {
-        return [];
-      }
+      result.push(mediaId);
     }
 
-    return sortMediaIds(Array.from(result), sort, this.takenAtByMediaId);
+    if (result.length === 0) {
+      return [];
+    }
+
+    return sortMediaIds(result, sort, this.takenAtByMediaId);
+  }
+
+  cursorStartIndex(sortedMediaIds: MediaId[], cursor: MediaId, sort: MediaSearchSort): number {
+    if (sort === "takenAt_desc" && !this.takenAtByMediaId.has(cursor) && !sortedMediaIds.includes(cursor)) {
+      return 0;
+    }
+    return upperBoundMediaIds(sortedMediaIds, cursor, sort, this.takenAtByMediaId);
   }
 
   private setKind(mediaId: MediaId, kind: string | undefined): void {
@@ -617,6 +645,72 @@ export class MediaSearchIndexStore {
     }
     this.sourceIdByMediaId.set(mediaId, sourceId);
     addToIndex(this.sourceIdIndex, sourceId, mediaId);
+  }
+
+  private setSha256(mediaId: MediaId, sha256: string | undefined): void {
+    const previous = this.sha256ByMediaId.get(mediaId);
+    if (previous) {
+      removeFromIndex(this.sha256ExactIndex, previous, mediaId);
+      removeFromIndex(this.sha256Prefix2Index, previous.slice(0, 2), mediaId);
+      removeFromIndex(this.sha256Prefix4Index, previous.slice(0, 4), mediaId);
+      removeFromIndex(this.sha256Prefix8Index, previous.slice(0, 8), mediaId);
+      this.sha256ByMediaId.delete(mediaId);
+    }
+
+    const normalized = normalizeSha256(sha256);
+    if (!normalized) {
+      return;
+    }
+
+    this.sha256ByMediaId.set(mediaId, normalized);
+    addToIndex(this.sha256ExactIndex, normalized, mediaId);
+    addToIndex(this.sha256Prefix2Index, normalized.slice(0, 2), mediaId);
+    addToIndex(this.sha256Prefix4Index, normalized.slice(0, 4), mediaId);
+    addToIndex(this.sha256Prefix8Index, normalized.slice(0, 8), mediaId);
+  }
+
+  private collectBySha256Prefix(prefix: string): ReadonlySet<MediaId> {
+    if (!prefix) {
+      return EMPTY_MEDIA_ID_SET;
+    }
+
+    if (prefix.length === 2) {
+      return this.sha256Prefix2Index.get(prefix) ?? EMPTY_MEDIA_ID_SET;
+    }
+
+    if (prefix.length === 4) {
+      return this.sha256Prefix4Index.get(prefix) ?? EMPTY_MEDIA_ID_SET;
+    }
+
+    if (prefix.length === 8) {
+      return this.sha256Prefix8Index.get(prefix) ?? EMPTY_MEDIA_ID_SET;
+    }
+
+    if (prefix.length === 64) {
+      return this.sha256ExactIndex.get(prefix) ?? EMPTY_MEDIA_ID_SET;
+    }
+
+    if (prefix.length === 3) {
+      return filterBySha256Prefix(
+        this.sha256Prefix2Index.get(prefix.slice(0, 2)),
+        prefix,
+        this.sha256ByMediaId
+      );
+    }
+
+    if (prefix.length >= 5 && prefix.length <= 7) {
+      return filterBySha256Prefix(
+        this.sha256Prefix4Index.get(prefix.slice(0, 4)),
+        prefix,
+        this.sha256ByMediaId
+      );
+    }
+
+    return filterBySha256Prefix(
+      this.sha256Prefix8Index.get(prefix.slice(0, 8)),
+      prefix,
+      this.sha256ByMediaId
+    );
   }
 
   private setCameraModel(mediaId: MediaId, cameraModel: string | undefined): void {
@@ -779,6 +873,42 @@ function normalizeGpsTile(value: string | undefined): string {
   return value.trim().toLowerCase();
 }
 
+function normalizeSha256(value: string | undefined): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+  const normalized = value.trim().toLowerCase();
+  return /^[0-9a-f]{64}$/.test(normalized) ? normalized : "";
+}
+
+function normalizeSha256Prefix(value: string | undefined): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+  const normalized = value.trim().toLowerCase();
+  return /^[0-9a-f]{2,64}$/.test(normalized) ? normalized : "";
+}
+
+function filterBySha256Prefix(
+  candidates: ReadonlySet<MediaId> | undefined,
+  prefix: string,
+  sha256ByMediaId: Map<MediaId, string>
+): ReadonlySet<MediaId> {
+  if (!candidates || candidates.size === 0) {
+    return EMPTY_MEDIA_ID_SET;
+  }
+
+  const result = new Set<MediaId>();
+  for (const mediaId of candidates) {
+    const sha256 = sha256ByMediaId.get(mediaId);
+    if (sha256?.startsWith(prefix)) {
+      result.add(mediaId);
+    }
+  }
+
+  return result.size > 0 ? result : EMPTY_MEDIA_ID_SET;
+}
+
 function toFiniteNumber(value: unknown): number | undefined {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
@@ -831,28 +961,63 @@ function sortMediaIds(
   sort: MediaSearchSort,
   takenAtByMediaId: Map<MediaId, number>
 ): MediaId[] {
-  if (sort === "takenAt_desc") {
-    return mediaIds.sort((left, right) => {
-      const leftTakenAt = takenAtByMediaId.get(left);
-      const rightTakenAt = takenAtByMediaId.get(right);
+  return mediaIds.sort((left, right) => compareMediaIdsForSort(left, right, sort, takenAtByMediaId));
+}
 
-      if (typeof leftTakenAt === "number" && typeof rightTakenAt === "number") {
-        if (rightTakenAt !== leftTakenAt) {
-          return rightTakenAt - leftTakenAt;
-        }
-        return left.localeCompare(right);
-      }
-      if (typeof leftTakenAt === "number") {
-        return -1;
-      }
-      if (typeof rightTakenAt === "number") {
-        return 1;
-      }
-      return left.localeCompare(right);
-    });
+function upperBoundMediaIds(
+  sortedMediaIds: MediaId[],
+  cursor: MediaId,
+  sort: MediaSearchSort,
+  takenAtByMediaId: Map<MediaId, number>
+): number {
+  let low = 0;
+  let high = sortedMediaIds.length;
+
+  while (low < high) {
+    const mid = low + Math.floor((high - low) / 2);
+    const midMediaId = sortedMediaIds[mid];
+    if (!midMediaId) {
+      high = mid;
+      continue;
+    }
+
+    const cmp = compareMediaIdsForSort(midMediaId, cursor, sort, takenAtByMediaId);
+    if (cmp <= 0) {
+      low = mid + 1;
+      continue;
+    }
+    high = mid;
   }
 
-  return mediaIds.sort((left, right) => left.localeCompare(right));
+  return low;
+}
+
+function compareMediaIdsForSort(
+  left: MediaId,
+  right: MediaId,
+  sort: MediaSearchSort,
+  takenAtByMediaId: Map<MediaId, number>
+): number {
+  if (sort === "mediaId_asc") {
+    return left.localeCompare(right);
+  }
+
+  const leftTakenAt = takenAtByMediaId.get(left);
+  const rightTakenAt = takenAtByMediaId.get(right);
+
+  if (typeof leftTakenAt === "number" && typeof rightTakenAt === "number") {
+    if (rightTakenAt !== leftTakenAt) {
+      return rightTakenAt - leftTakenAt;
+    }
+    return left.localeCompare(right);
+  }
+  if (typeof leftTakenAt === "number") {
+    return -1;
+  }
+  if (typeof rightTakenAt === "number") {
+    return 1;
+  }
+  return left.localeCompare(right);
 }
 
 function normalizePerceptualHash(value: unknown): string | undefined {

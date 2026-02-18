@@ -1,7 +1,7 @@
 import http from "node:http";
 import { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
-import { createEvent, newMediaId, newSourceEntryId, newSourceId } from "@family-media-vault/core";
+import { asMediaId, createEvent, newMediaId, newSourceEntryId, newSourceId } from "@family-media-vault/core";
 import { DomainState } from "@family-media-vault/storage";
 import { JobEngine, JobStore } from "@family-media-vault/jobs";
 import { createRequestHandler } from "../routes";
@@ -319,7 +319,7 @@ describe("server routes", () => {
       createEvent("MEDIA_IMPORTED", {
         media: {
           mediaId: mediaIdA,
-          sha256: "a".repeat(64),
+          sha256: "ab".repeat(32),
           size: 11,
           sourceEntryId: sourceEntryIdA
         }
@@ -378,7 +378,7 @@ describe("server routes", () => {
 
     const { baseUrl } = await startServer(runtime);
     const response = await fetch(
-      `${baseUrl}/media/search?kind=photo&mimeType=image%2Fjpeg&sourceId=${encodeURIComponent(String(sourceId))}&duplicateLevel=strong&cameraModel=${encodeURIComponent("Canon EOS R6")}&takenDay=2024-01-02&gpsTile=55.7%3A37.6&limit=5&offset=0`
+      `${baseUrl}/media/search?kind=photo&mimeType=image%2Fjpeg&sourceId=${encodeURIComponent(String(sourceId))}&duplicateLevel=strong&cameraModel=${encodeURIComponent("Canon EOS R6")}&takenDay=2024-01-02&gpsTile=55.7%3A37.6&sha256Prefix=ABABABAB&limit=5&offset=0`
     );
     const body = (await response.json()) as {
       media: Array<{ mediaId: string }>;
@@ -393,6 +393,7 @@ describe("server routes", () => {
         cameraModel: string | null;
         takenDay: string | null;
         gpsTile: string | null;
+        sha256Prefix: string | null;
       };
     };
 
@@ -409,6 +410,182 @@ describe("server routes", () => {
     expect(body.filters.cameraModel).toBe("Canon EOS R6");
     expect(body.filters.takenDay).toBe("2024-01-02");
     expect(body.filters.gpsTile).toBe("55.7:37.6");
+    expect(body.filters.sha256Prefix).toBe("abababab");
+  });
+
+  it("returns media search results for sha256Prefix filter", async () => {
+    const runtime = createRuntime();
+    const sourceId = newSourceId();
+    const sourceEntryIdA = newSourceEntryId();
+    const sourceEntryIdB = newSourceEntryId();
+    const mediaIdA = newMediaId();
+    const mediaIdB = newMediaId();
+
+    runtime.state.applyEvent(
+      createEvent("SOURCE_CREATED", {
+        source: {
+          sourceId,
+          path: "C:/tmp/source",
+          recursive: true,
+          includeArchives: false,
+          excludeGlobs: [],
+          createdAt: Date.now()
+        }
+      })
+    );
+    runtime.state.applyEvent(
+      createEvent("SOURCE_ENTRY_UPSERTED", {
+        entry: {
+          sourceEntryId: sourceEntryIdA,
+          sourceId,
+          kind: "file",
+          path: "C:/tmp/source/a.jpg",
+          size: 11,
+          mtimeMs: Date.now(),
+          fingerprint: "11:1:head-a",
+          lastSeenAt: Date.now(),
+          state: "active"
+        }
+      })
+    );
+    runtime.state.applyEvent(
+      createEvent("SOURCE_ENTRY_UPSERTED", {
+        entry: {
+          sourceEntryId: sourceEntryIdB,
+          sourceId,
+          kind: "file",
+          path: "C:/tmp/source/b.jpg",
+          size: 12,
+          mtimeMs: Date.now(),
+          fingerprint: "12:1:head-b",
+          lastSeenAt: Date.now(),
+          state: "active"
+        }
+      })
+    );
+    runtime.state.applyEvent(
+      createEvent("MEDIA_IMPORTED", {
+        media: {
+          mediaId: mediaIdA,
+          sha256: "ab".repeat(32),
+          size: 11,
+          sourceEntryId: sourceEntryIdA
+        }
+      })
+    );
+    runtime.state.applyEvent(
+      createEvent("MEDIA_IMPORTED", {
+        media: {
+          mediaId: mediaIdB,
+          sha256: "cd".repeat(32),
+          size: 12,
+          sourceEntryId: sourceEntryIdB
+        }
+      })
+    );
+
+    const { baseUrl } = await startServer(runtime);
+    const response = await fetch(`${baseUrl}/media/search?sha256Prefix=ABAB`);
+    const body = (await response.json()) as {
+      media: Array<{ mediaId: string }>;
+      total: number;
+      filters: { sha256Prefix: string | null };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.total).toBe(1);
+    expect(body.media).toHaveLength(1);
+    expect(body.media[0]?.mediaId).toBe(mediaIdA);
+    expect(body.filters.sha256Prefix).toBe("abab");
+  });
+
+  it("supports sha256Prefix filters with length 3, 5 and 9", async () => {
+    const runtime = createRuntime();
+    const sourceId = newSourceId();
+    const sourceEntryIdA = newSourceEntryId();
+    const sourceEntryIdB = newSourceEntryId();
+    const mediaIdA = newMediaId();
+    const mediaIdB = newMediaId();
+
+    runtime.state.applyEvent(
+      createEvent("SOURCE_CREATED", {
+        source: {
+          sourceId,
+          path: "C:/tmp/source",
+          recursive: true,
+          includeArchives: false,
+          excludeGlobs: [],
+          createdAt: Date.now()
+        }
+      })
+    );
+    runtime.state.applyEvent(
+      createEvent("SOURCE_ENTRY_UPSERTED", {
+        entry: {
+          sourceEntryId: sourceEntryIdA,
+          sourceId,
+          kind: "file",
+          path: "C:/tmp/source/a.jpg",
+          size: 11,
+          mtimeMs: Date.now(),
+          fingerprint: "11:1:head-a",
+          lastSeenAt: Date.now(),
+          state: "active"
+        }
+      })
+    );
+    runtime.state.applyEvent(
+      createEvent("SOURCE_ENTRY_UPSERTED", {
+        entry: {
+          sourceEntryId: sourceEntryIdB,
+          sourceId,
+          kind: "file",
+          path: "C:/tmp/source/b.jpg",
+          size: 12,
+          mtimeMs: Date.now(),
+          fingerprint: "12:1:head-b",
+          lastSeenAt: Date.now(),
+          state: "active"
+        }
+      })
+    );
+    runtime.state.applyEvent(
+      createEvent("MEDIA_IMPORTED", {
+        media: {
+          mediaId: mediaIdA,
+          sha256: "abcdefff".repeat(8),
+          size: 11,
+          sourceEntryId: sourceEntryIdA
+        }
+      })
+    );
+    runtime.state.applyEvent(
+      createEvent("MEDIA_IMPORTED", {
+        media: {
+          mediaId: mediaIdB,
+          sha256: "abf01234".repeat(8),
+          size: 12,
+          sourceEntryId: sourceEntryIdB
+        }
+      })
+    );
+
+    const { baseUrl } = await startServer(runtime);
+
+    for (const prefix of ["ABC", "abcde", "AbCdEfFfA"]) {
+      const response = await fetch(`${baseUrl}/media/search?sha256Prefix=${encodeURIComponent(prefix)}`);
+      const body = (await response.json()) as {
+        media: Array<{ mediaId: string }>;
+        total: number;
+        filters: { sha256Prefix: string | null };
+      };
+
+      expect(response.status).toBe(200);
+      expect(body.total).toBe(1);
+      expect(body.media).toHaveLength(1);
+      expect(body.media[0]?.mediaId).toBe(mediaIdA);
+      expect(body.filters.sha256Prefix).toBe(prefix.toLowerCase());
+    }
   });
 
   it("returns 400 when media search is called without filters", async () => {
@@ -453,6 +630,17 @@ describe("server routes", () => {
 
     expect(response.status).toBe(400);
     expect(body.error).toBe("invalid_gps_tile_filter");
+  });
+
+  it("returns 400 for invalid sha256Prefix filter", async () => {
+    const runtime = createRuntime();
+    const { baseUrl } = await startServer(runtime);
+
+    const response = await fetch(`${baseUrl}/media/search?sha256Prefix=xyz`);
+    const body = (await response.json()) as { error: string };
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe("invalid_sha256_prefix_filter");
   });
 
   it("matches cameraModel filter case-insensitively", async () => {
@@ -616,6 +804,247 @@ describe("server routes", () => {
     for (const item of secondBody.media) {
       expect(firstIds.has(item.mediaId)).toBe(false);
     }
+  });
+
+  it("uses insertion cursor for missing mediaId cursor value", async () => {
+    const runtime = createRuntime();
+    const sourceId = newSourceId();
+    const entryIds = [newSourceEntryId(), newSourceEntryId(), newSourceEntryId()];
+    const mediaIds = [asMediaId("med_100"), asMediaId("med_200"), asMediaId("med_300")];
+
+    runtime.state.applyEvent(
+      createEvent("SOURCE_CREATED", {
+        source: {
+          sourceId,
+          path: "C:/tmp/source",
+          recursive: true,
+          includeArchives: false,
+          excludeGlobs: [],
+          createdAt: Date.now()
+        }
+      })
+    );
+
+    for (let i = 0; i < entryIds.length; i += 1) {
+      const sourceEntryId = entryIds[i];
+      const mediaId = mediaIds[i];
+      if (!sourceEntryId || !mediaId) {
+        continue;
+      }
+
+      runtime.state.applyEvent(
+        createEvent("SOURCE_ENTRY_UPSERTED", {
+          entry: {
+            sourceEntryId,
+            sourceId,
+            kind: "file",
+            path: `C:/tmp/source/${i}.jpg`,
+            size: 10 + i,
+            mtimeMs: Date.now(),
+            fingerprint: `${10 + i}:1:head-${i}`,
+            lastSeenAt: Date.now(),
+            state: "active"
+          }
+        })
+      );
+      runtime.state.applyEvent(
+        createEvent("MEDIA_IMPORTED", {
+          media: {
+            mediaId,
+            sha256: `${i}`.repeat(64),
+            size: 10 + i,
+            sourceEntryId
+          }
+        })
+      );
+      runtime.state.applyEvent(
+        createEvent("MEDIA_METADATA_EXTRACTED", {
+          mediaId,
+          sourceEntryId,
+          metadata: { kind: "photo", mimeType: "image/jpeg", takenAt: 100 + i }
+        })
+      );
+    }
+
+    const { baseUrl } = await startServer(runtime);
+    const response = await fetch(`${baseUrl}/media/search?kind=photo&sort=mediaId_asc&limit=2&cursor=med_250`);
+    const body = (await response.json()) as {
+      media: Array<{ mediaId: string }>;
+      total: number;
+      nextCursor: string | null;
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.total).toBe(3);
+    expect(body.media).toHaveLength(1);
+    expect(body.media[0]?.mediaId).toBe("med_300");
+    expect(body.nextCursor).toBeNull();
+  });
+
+  it("supports takenAt_desc cursor pagination with stable tie-breaker", async () => {
+    const runtime = createRuntime();
+    const sourceId = newSourceId();
+    const entryIds = [newSourceEntryId(), newSourceEntryId(), newSourceEntryId()];
+    const mediaIds = [asMediaId("med_100"), asMediaId("med_200"), asMediaId("med_300")];
+    const takenAts = [200, 200, 100];
+
+    runtime.state.applyEvent(
+      createEvent("SOURCE_CREATED", {
+        source: {
+          sourceId,
+          path: "C:/tmp/source",
+          recursive: true,
+          includeArchives: false,
+          excludeGlobs: [],
+          createdAt: Date.now()
+        }
+      })
+    );
+
+    for (let i = 0; i < entryIds.length; i += 1) {
+      const sourceEntryId = entryIds[i];
+      const mediaId = mediaIds[i];
+      const takenAt = takenAts[i];
+      if (!sourceEntryId || !mediaId || takenAt === undefined) {
+        continue;
+      }
+
+      runtime.state.applyEvent(
+        createEvent("SOURCE_ENTRY_UPSERTED", {
+          entry: {
+            sourceEntryId,
+            sourceId,
+            kind: "file",
+            path: `C:/tmp/source/${i}.jpg`,
+            size: 10 + i,
+            mtimeMs: Date.now(),
+            fingerprint: `${10 + i}:1:head-${i}`,
+            lastSeenAt: Date.now(),
+            state: "active"
+          }
+        })
+      );
+      runtime.state.applyEvent(
+        createEvent("MEDIA_IMPORTED", {
+          media: {
+            mediaId,
+            sha256: `${i}`.repeat(64),
+            size: 10 + i,
+            sourceEntryId
+          }
+        })
+      );
+      runtime.state.applyEvent(
+        createEvent("MEDIA_METADATA_EXTRACTED", {
+          mediaId,
+          sourceEntryId,
+          metadata: { kind: "photo", mimeType: "image/jpeg", takenAt }
+        })
+      );
+    }
+
+    const { baseUrl } = await startServer(runtime);
+    const firstResponse = await fetch(`${baseUrl}/media/search?kind=photo&sort=takenAt_desc&limit=2`);
+    const firstBody = (await firstResponse.json()) as {
+      media: Array<{ mediaId: string }>;
+      total: number;
+      nextCursor: string | null;
+    };
+
+    expect(firstResponse.status).toBe(200);
+    expect(firstBody.total).toBe(3);
+    expect(firstBody.media.map((item) => item.mediaId)).toEqual(["med_100", "med_200"]);
+    expect(firstBody.nextCursor).toBe("med_200");
+
+    const secondResponse = await fetch(
+      `${baseUrl}/media/search?kind=photo&sort=takenAt_desc&limit=2&cursor=med_200`
+    );
+    const secondBody = (await secondResponse.json()) as {
+      media: Array<{ mediaId: string }>;
+      total: number;
+      nextCursor: string | null;
+    };
+
+    expect(secondResponse.status).toBe(200);
+    expect(secondBody.total).toBe(3);
+    expect(secondBody.media.map((item) => item.mediaId)).toEqual(["med_300"]);
+    expect(secondBody.nextCursor).toBeNull();
+  });
+
+  it("falls back to first page for missing cursor in takenAt_desc sort", async () => {
+    const runtime = createRuntime();
+    const sourceId = newSourceId();
+    const entryIds = [newSourceEntryId(), newSourceEntryId(), newSourceEntryId()];
+    const mediaIds = [asMediaId("med_100"), asMediaId("med_200"), asMediaId("med_300")];
+    const takenAts = [300, 200, 100];
+
+    runtime.state.applyEvent(
+      createEvent("SOURCE_CREATED", {
+        source: {
+          sourceId,
+          path: "C:/tmp/source",
+          recursive: true,
+          includeArchives: false,
+          excludeGlobs: [],
+          createdAt: Date.now()
+        }
+      })
+    );
+
+    for (let i = 0; i < entryIds.length; i += 1) {
+      const sourceEntryId = entryIds[i];
+      const mediaId = mediaIds[i];
+      const takenAt = takenAts[i];
+      if (!sourceEntryId || !mediaId || takenAt === undefined) {
+        continue;
+      }
+
+      runtime.state.applyEvent(
+        createEvent("SOURCE_ENTRY_UPSERTED", {
+          entry: {
+            sourceEntryId,
+            sourceId,
+            kind: "file",
+            path: `C:/tmp/source/${i}.jpg`,
+            size: 10 + i,
+            mtimeMs: Date.now(),
+            fingerprint: `${10 + i}:1:head-${i}`,
+            lastSeenAt: Date.now(),
+            state: "active"
+          }
+        })
+      );
+      runtime.state.applyEvent(
+        createEvent("MEDIA_IMPORTED", {
+          media: {
+            mediaId,
+            sha256: `${i}`.repeat(64),
+            size: 10 + i,
+            sourceEntryId
+          }
+        })
+      );
+      runtime.state.applyEvent(
+        createEvent("MEDIA_METADATA_EXTRACTED", {
+          mediaId,
+          sourceEntryId,
+          metadata: { kind: "photo", mimeType: "image/jpeg", takenAt }
+        })
+      );
+    }
+
+    const { baseUrl } = await startServer(runtime);
+    const response = await fetch(`${baseUrl}/media/search?kind=photo&sort=takenAt_desc&limit=2&cursor=med_999`);
+    const body = (await response.json()) as {
+      media: Array<{ mediaId: string }>;
+      total: number;
+      nextCursor: string | null;
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.total).toBe(3);
+    expect(body.media.map((item) => item.mediaId)).toEqual(["med_100", "med_200"]);
+    expect(body.nextCursor).toBe("med_200");
   });
 
   it("supports takenAt_desc sort for media search", async () => {

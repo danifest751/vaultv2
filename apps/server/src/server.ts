@@ -10,6 +10,10 @@ export async function startServer(config: ServerConfig): Promise<http.Server> {
     vaultDir: config.vaultDir,
     derivedDir: config.derivedDir,
     hmacSecret: config.hmacSecret,
+    jobConcurrencyTotal: config.jobConcurrencyTotal,
+    jobConcurrencyIo: config.jobConcurrencyIo,
+    jobConcurrencyCpu: config.jobConcurrencyCpu,
+    jobConcurrencyControl: config.jobConcurrencyControl,
     derivedGenerateMaxAttempts: config.derivedGenerateMaxAttempts,
     dedupStrongDistanceThreshold: config.dedupStrongDistanceThreshold,
     dedupProbableDistanceThreshold: config.dedupProbableDistanceThreshold

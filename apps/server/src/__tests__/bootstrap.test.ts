@@ -21,6 +21,10 @@ describe("bootstrapServerRuntime", () => {
       vaultDir,
       derivedDir,
       hmacSecret,
+      jobConcurrencyTotal: 2,
+      jobConcurrencyIo: 1,
+      jobConcurrencyCpu: 1,
+      jobConcurrencyControl: 1,
       derivedGenerateMaxAttempts: 2,
       dedupStrongDistanceThreshold: 4,
       dedupProbableDistanceThreshold: 10
@@ -62,6 +66,10 @@ describe("bootstrapServerRuntime", () => {
       vaultDir,
       derivedDir,
       hmacSecret,
+      jobConcurrencyTotal: 2,
+      jobConcurrencyIo: 1,
+      jobConcurrencyCpu: 1,
+      jobConcurrencyControl: 1,
       derivedGenerateMaxAttempts: 2,
       dedupStrongDistanceThreshold: 0,
       dedupProbableDistanceThreshold: 2

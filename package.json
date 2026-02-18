@@ -10,6 +10,7 @@
     "build": "tsc -b",
     "test": "vitest run",
     "test:watch": "vitest",
+    "bench:media-search": "npm run build && npm --workspace @family-media-vault/server run bench:media-search",
     "web:dev": "npm --workspace @family-media-vault/web run dev",
     "web:build": "npm --workspace @family-media-vault/web run build"
   },

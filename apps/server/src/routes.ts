@@ -31,11 +31,6 @@ export interface RequestHandlerOptions {
   snapshotRetentionMax?: number;
 }
 
-function cursorStartIndex(sortedMediaIds: string[], cursor: string): number {
-  const index = sortedMediaIds.indexOf(cursor);
-  return index < 0 ? 0 : index + 1;
-}
-
 interface ToolsHealthSnapshot {
   checkedAt: number;
   tools: {
@@ -88,6 +83,17 @@ function isSourcePathAllowed(sourcePath: string, allowlistRoots: string[]): bool
 
   const normalizedSourcePath = normalizePathForComparison(sourcePath);
   return allowlistRoots.some((root) => isPathWithinRoot(normalizedSourcePath, root));
+}
+
+function normalizeSha256PrefixFilter(value: string | null): string | undefined {
+  if (value === null) {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (!/^[0-9a-f]{2,64}$/.test(normalized)) {
+    return undefined;
+  }
+  return normalized;
 }
 
 function isAuthorizedRequest(req: IncomingMessage, configuredToken: string): boolean {
@@ -544,7 +550,14 @@ export function createRequestHandler(runtime: ServerRuntime, options: RequestHan
           return;
         }
 
-        if (!kind && !mimeType && !sourceId && !duplicateLevel && !cameraModel && !takenDay && !gpsTile) {
+        const sha256PrefixRaw = fullUrl.searchParams.get("sha256Prefix");
+        const sha256Prefix = normalizeSha256PrefixFilter(sha256PrefixRaw);
+        if (sha256PrefixRaw !== null && !sha256Prefix) {
+          sendJson(res, 400, { error: "invalid_sha256_prefix_filter" });
+          return;
+        }
+
+        if (!kind && !mimeType && !sourceId && !duplicateLevel && !cameraModel && !takenDay && !gpsTile && !sha256Prefix) {
           sendJson(res, 400, { error: "search_filter_required" });
           return;
         }
@@ -575,12 +588,13 @@ export function createRequestHandler(runtime: ServerRuntime, options: RequestHan
             duplicateLevel,
             cameraModel,
             takenDay,
-            gpsTile
+            gpsTile,
+            sha256Prefix
           },
           runtime.state,
           sort
         );
-        const cursorStart = cursor ? cursorStartIndex(mediaIds, cursor) : 0;
+        const cursorStart = cursor ? runtime.state.mediaSearch.cursorStartIndex(mediaIds, cursor, sort) : 0;
         const pageMediaIds = useCursorMode
           ? mediaIds.slice(cursorStart, cursorStart + limit)
           : mediaIds.slice(offset, offset + limit);
@@ -608,7 +622,8 @@ export function createRequestHandler(runtime: ServerRuntime, options: RequestHan
             duplicateLevel: duplicateLevel ?? null,
             cameraModel: cameraModel ?? null,
             takenDay: takenDay ?? null,
-            gpsTile: gpsTile ?? null
+            gpsTile: gpsTile ?? null,
+            sha256Prefix: sha256Prefix ?? null
           }
         });
         return;

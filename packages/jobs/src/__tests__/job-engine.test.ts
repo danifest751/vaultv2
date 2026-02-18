@@ -177,4 +177,75 @@ describe("JobEngine", () => {
     expect(events.filter((type) => type === "JOB_RETRY_SCHEDULED")).toHaveLength(1);
     expect(events.filter((type) => type === "JOB_FAILED")).toHaveLength(1);
   });
+
+  it("enforces per-pool concurrency limits", async () => {
+    const baseDir = await mkdtemp(path.join(tmpdir(), "fmv-jobs-pools-"));
+    const walDir = path.join(baseDir, "wal");
+
+    const writer = await WalWriter.create({ walDir, hmacSecret: HMAC_SECRET, fsync: false });
+    const store = new JobStore();
+
+    const engine = new JobEngine({
+      store,
+      eventWriter: {
+        append: async (event) => {
+          await writer.append(event);
+        }
+      },
+      concurrency: 4,
+      poolConcurrency: {
+        io: 1,
+        cpu: 2
+      }
+    });
+
+    let ioActive = 0;
+    let ioMaxActive = 0;
+    let cpuActive = 0;
+    let cpuMaxActive = 0;
+
+    engine.register({
+      kind: "io-job",
+      pool: "io",
+      handler: async () => {
+        ioActive += 1;
+        ioMaxActive = Math.max(ioMaxActive, ioActive);
+        await sleep(25);
+        ioActive -= 1;
+      }
+    });
+
+    engine.register({
+      kind: "cpu-job",
+      pool: "cpu",
+      handler: async () => {
+        cpuActive += 1;
+        cpuMaxActive = Math.max(cpuMaxActive, cpuActive);
+        await sleep(25);
+        cpuActive -= 1;
+      }
+    });
+
+    await Promise.all([
+      engine.enqueue("io-job"),
+      engine.enqueue("io-job"),
+      engine.enqueue("io-job"),
+      engine.enqueue("cpu-job"),
+      engine.enqueue("cpu-job"),
+      engine.enqueue("cpu-job")
+    ]);
+
+    await engine.runUntilIdle();
+    await writer.close();
+
+    expect(ioMaxActive).toBeLessThanOrEqual(1);
+    expect(cpuMaxActive).toBeLessThanOrEqual(2);
+    expect(store.list().every((job) => job.status === "completed")).toBe(true);
+  });
 });
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}

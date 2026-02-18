@@ -85,7 +85,7 @@ describe("rebuildDomainState", () => {
     const mediaImported = createEvent("MEDIA_IMPORTED", {
       media: {
         mediaId,
-        sha256: "sha256-a",
+        sha256: "ab".repeat(32),
         size: 10,
         sourceEntryId: entryId
       }
@@ -109,7 +109,7 @@ describe("rebuildDomainState", () => {
     const mediaImportedB = createEvent("MEDIA_IMPORTED", {
       media: {
         mediaId: mediaIdB,
-        sha256: "sha256-b",
+        sha256: "cd".repeat(32),
         size: 11,
         sourceEntryId: entryIdB
       }
@@ -149,5 +149,7 @@ describe("rebuildDomainState", () => {
     expect(new Set(rebuilt.mediaSearch.query({ cameraModel: "canon eos r6" }, rebuilt))).toEqual(new Set([mediaId]));
     expect(new Set(rebuilt.mediaSearch.query({ takenDay: "2024-01-02" }, rebuilt))).toEqual(new Set([mediaId]));
     expect(new Set(rebuilt.mediaSearch.query({ gpsTile: "55.7:37.6" }, rebuilt))).toEqual(new Set([mediaId]));
+    expect(new Set(rebuilt.mediaSearch.query({ sha256Prefix: "ABAB" }, rebuilt))).toEqual(new Set([mediaId]));
+    expect(new Set(rebuilt.mediaSearch.query({ sha256Prefix: "cdcd" }, rebuilt))).toEqual(new Set([mediaIdB]));
   });
 });

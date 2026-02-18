@@ -29,6 +29,10 @@ export interface BootstrapOptions {
   vaultDir: string;
   derivedDir: string;
   hmacSecret: string;
+  jobConcurrencyTotal: number;
+  jobConcurrencyIo: number;
+  jobConcurrencyCpu: number;
+  jobConcurrencyControl: number;
   derivedGenerateMaxAttempts: number;
   dedupStrongDistanceThreshold: number;
   dedupProbableDistanceThreshold: number;
@@ -112,7 +116,12 @@ export async function bootstrapServerRuntime(options: BootstrapOptions): Promise
         jobStore.applyEvent(event);
       }
     },
-    concurrency: 2
+    concurrency: options.jobConcurrencyTotal,
+    poolConcurrency: {
+      io: options.jobConcurrencyIo,
+      cpu: options.jobConcurrencyCpu,
+      control: options.jobConcurrencyControl
+    }
   });
 
   const appendEvent = async (event: ReturnType<typeof createEvent>) => {
@@ -127,23 +136,28 @@ export async function bootstrapServerRuntime(options: BootstrapOptions): Promise
 
   jobEngine.register({
     kind: "scan:source",
+    pool: "io",
     handler: createScanJobHandler({ state, appendEvent, jobEngine })
   });
   jobEngine.register({
     kind: "ingest:stage-a-b",
+    pool: "io",
     handler: createIngestJobHandler({ state, appendEvent, vault, jobEngine })
   });
   jobEngine.register({
     kind: "metadata:extract",
+    pool: "cpu",
     handler: createMetadataJobHandler({ state, appendEvent, jobEngine })
   });
   jobEngine.register({
     kind: "derived:generate",
+    pool: "cpu",
     maxAttempts: options.derivedGenerateMaxAttempts,
     handler: createDerivedGenerateJobHandler({ state, vault, derived })
   });
   jobEngine.register({
     kind: "dedup:probable",
+    pool: "cpu",
     handler: createProbableDedupJobHandler({
       state,
       appendEvent,
@@ -153,10 +167,12 @@ export async function bootstrapServerRuntime(options: BootstrapOptions): Promise
   });
   jobEngine.register({
     kind: "quarantine:accept",
+    pool: "control",
     handler: createQuarantineAcceptJobHandler({ state, appendEvent })
   });
   jobEngine.register({
     kind: "quarantine:reject",
+    pool: "control",
     handler: createQuarantineRejectJobHandler({ state, appendEvent })
   });
 

@@ -21,6 +21,7 @@ export interface JobDefinition {
   kind: string;
   handler: JobHandler;
   maxAttempts?: number;
+  pool?: string;
 }
 
 export interface JobEventWriter {
@@ -31,27 +32,44 @@ export interface JobEngineOptions {
   store: JobStore;
   eventWriter: JobEventWriter;
   concurrency?: number;
+  poolConcurrency?: Record<string, number>;
+  defaultPool?: string;
 }
 
 interface RegisteredJob {
   handler: JobHandler;
   maxAttempts: number;
+  pool: string;
 }
 
 export class JobEngine {
   private readonly store: JobStore;
   private readonly eventWriter: JobEventWriter;
   private readonly concurrency: number;
+  private readonly defaultPool: string;
+  private readonly poolConcurrency = new Map<string, number>();
   private readonly registry = new Map<string, RegisteredJob>();
   private readonly queue: JobId[] = [];
   private readonly inflight = new Set<Promise<void>>();
   private readonly retryTimers = new Map<JobId, ReturnType<typeof setTimeout>>();
+  private readonly activeCountByPool = new Map<string, number>();
   private activeCount = 0;
 
   constructor(options: JobEngineOptions) {
     this.store = options.store;
     this.eventWriter = options.eventWriter;
     this.concurrency = Math.max(1, options.concurrency ?? 1);
+    this.defaultPool = normalizePoolName(options.defaultPool);
+
+    if (options.poolConcurrency) {
+      for (const [rawPool, rawLimit] of Object.entries(options.poolConcurrency)) {
+        const pool = normalizePoolName(rawPool);
+        const limit = Math.max(1, Math.floor(rawLimit));
+        if (Number.isFinite(limit)) {
+          this.poolConcurrency.set(pool, limit);
+        }
+      }
+    }
   }
 
   register(definition: JobDefinition): void {
@@ -60,7 +78,8 @@ export class JobEngine {
     }
     this.registry.set(definition.kind, {
       handler: definition.handler,
-      maxAttempts: definition.maxAttempts ?? 1
+      maxAttempts: definition.maxAttempts ?? 1,
+      pool: normalizePoolName(definition.pool) ?? this.defaultPool
     });
   }
 
@@ -111,7 +130,7 @@ export class JobEngine {
 
   private schedule(): void {
     while (this.activeCount < this.concurrency && this.queue.length > 0) {
-      const jobId = this.queue.shift();
+      const jobId = this.dequeueNextRunnable();
       if (!jobId) {
         return;
       }
@@ -124,17 +143,45 @@ export class JobEngine {
     }
   }
 
+  private dequeueNextRunnable(): JobId | null {
+    for (let index = 0; index < this.queue.length; index += 1) {
+      const jobId = this.queue[index];
+      if (!jobId) {
+        continue;
+      }
+
+      const job = this.store.get(jobId);
+      if (!job || job.status !== "queued") {
+        this.queue.splice(index, 1);
+        index -= 1;
+        continue;
+      }
+
+      const pool = this.resolvePoolForKind(job.kind);
+      if (this.getPoolActiveCount(pool) >= this.getPoolLimit(pool)) {
+        continue;
+      }
+
+      this.queue.splice(index, 1);
+      return jobId;
+    }
+
+    return null;
+  }
+
   private async runJob(jobId: JobId): Promise<void> {
     const job = this.store.get(jobId);
     if (!job || job.status !== "queued") {
       return;
     }
 
+    const pool = this.resolvePoolForKind(job.kind);
     this.activeCount += 1;
+    this.incrementPoolActiveCount(pool);
 
-    const registered = this.registry.get(job.kind);
-    if (!registered) {
-      try {
+    try {
+      const registered = this.registry.get(job.kind);
+      if (!registered) {
         await this.appendEvent(
           createEvent(
             "JOB_FAILED",
@@ -142,15 +189,11 @@ export class JobEngine {
             { jobId }
           )
         );
-      } finally {
-        this.activeCount -= 1;
+        return;
       }
-      return;
-    }
 
-    const attempt = job.attempts + 1;
-    if (attempt > registered.maxAttempts) {
-      try {
+      const attempt = job.attempts + 1;
+      if (attempt > registered.maxAttempts) {
         await this.appendEvent(
           createEvent(
             "JOB_FAILED",
@@ -158,51 +201,76 @@ export class JobEngine {
             { jobId }
           )
         );
-      } finally {
-        this.activeCount -= 1;
+        return;
       }
-      return;
-    }
 
-    const startedAt = Date.now();
-    await this.appendEvent(
-      createEvent(
-        "JOB_STARTED",
-        { jobId, kind: job.kind, attempt },
-        { jobId }
-      )
-    );
+      const startedAt = Date.now();
+      await this.appendEvent(
+        createEvent(
+          "JOB_STARTED",
+          { jobId, kind: job.kind, attempt },
+          { jobId }
+        )
+      );
 
-    try {
-      await registered.handler({
-        jobId,
-        kind: job.kind,
-        payload: job.payload,
-        attempt,
-        startedAt
-      });
-      await this.appendEvent(createEvent("JOB_COMPLETED", { jobId }, { jobId }));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (attempt < registered.maxAttempts) {
-        const backoffMs = computeRetryBackoffMs(attempt);
-        const retryAt = Date.now() + backoffMs;
-        await this.appendEvent(
-          createEvent(
-            "JOB_RETRY_SCHEDULED",
-            { jobId, kind: job.kind, attempt, retryAt, error: message },
-            { jobId }
-          )
-        );
-        this.scheduleRetry(jobId, backoffMs);
-      } else {
-        await this.appendEvent(
-          createEvent("JOB_FAILED", { jobId, error: message }, { jobId })
-        );
+      try {
+        await registered.handler({
+          jobId,
+          kind: job.kind,
+          payload: job.payload,
+          attempt,
+          startedAt
+        });
+        await this.appendEvent(createEvent("JOB_COMPLETED", { jobId }, { jobId }));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (attempt < registered.maxAttempts) {
+          const backoffMs = computeRetryBackoffMs(attempt);
+          const retryAt = Date.now() + backoffMs;
+          await this.appendEvent(
+            createEvent(
+              "JOB_RETRY_SCHEDULED",
+              { jobId, kind: job.kind, attempt, retryAt, error: message },
+              { jobId }
+            )
+          );
+          this.scheduleRetry(jobId, backoffMs);
+        } else {
+          await this.appendEvent(
+            createEvent("JOB_FAILED", { jobId, error: message }, { jobId })
+          );
+        }
       }
     } finally {
       this.activeCount -= 1;
+      this.decrementPoolActiveCount(pool);
     }
+  }
+
+  private resolvePoolForKind(kind: string): string {
+    return this.registry.get(kind)?.pool ?? this.defaultPool;
+  }
+
+  private getPoolLimit(pool: string): number {
+    return this.poolConcurrency.get(pool) ?? this.concurrency;
+  }
+
+  private getPoolActiveCount(pool: string): number {
+    return this.activeCountByPool.get(pool) ?? 0;
+  }
+
+  private incrementPoolActiveCount(pool: string): void {
+    const current = this.activeCountByPool.get(pool) ?? 0;
+    this.activeCountByPool.set(pool, current + 1);
+  }
+
+  private decrementPoolActiveCount(pool: string): void {
+    const current = this.activeCountByPool.get(pool) ?? 0;
+    if (current <= 1) {
+      this.activeCountByPool.delete(pool);
+      return;
+    }
+    this.activeCountByPool.set(pool, current - 1);
   }
 
   private scheduleRetry(jobId: JobId, backoffMs: number): void {
@@ -223,4 +291,9 @@ export class JobEngine {
     await this.eventWriter.append(event);
     this.store.applyEvent(event);
   }
+}
+
+function normalizePoolName(pool: string | undefined): string {
+  const normalized = pool?.trim();
+  return normalized && normalized.length > 0 ? normalized : "default";
 }
