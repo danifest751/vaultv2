@@ -8,7 +8,8 @@
     "build": "tsc -b",
     "start": "node dist/index.js",
     "start:dev": "set WAL_HMAC_SECRET=dev-local-secret&& node dist/index.js",
-    "bench:media-search": "node dist/benchmarks/media-search-benchmark.js"
+    "bench:media-search": "node dist/benchmarks/media-search-benchmark.js",
+    "bench:media-search:gate": "node dist/benchmarks/media-search-perf-gate.js"
   },
   "dependencies": {
     "@family-media-vault/core": "file:../../packages/core",

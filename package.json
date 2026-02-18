@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "bench:media-search": "npm run build && npm --workspace @family-media-vault/server run bench:media-search",
+    "test:perf:media-search": "npm run build && npm --workspace @family-media-vault/server run bench:media-search:gate",
     "web:dev": "npm --workspace @family-media-vault/web run dev",
     "web:build": "npm --workspace @family-media-vault/web run build"
   },
