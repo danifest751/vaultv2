@@ -9,3 +9,6 @@ data/
 
 .vscode/
 .DS_Store
+
+# local temporary patch artifacts
+apps/web/dev-console-v2.patch
