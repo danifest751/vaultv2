@@ -9,6 +9,7 @@ export interface ServerConfig {
   snapshotRetentionMax: number;
   hmacSecret: string;
   authToken: string;
+  devConsoleRedirectUrl: string;
   sourcePathAllowlistRoots: string[];
   jobConcurrencyTotal: number;
   jobConcurrencyIo: number;
@@ -36,6 +37,7 @@ export function loadServerConfig(env: NodeJS.ProcessEnv): ServerConfig {
   }
 
   const authToken = env.AUTH_TOKEN?.trim() ?? "";
+  const devConsoleRedirectUrl = env.DEV_CONSOLE_REDIRECT_URL?.trim() ?? "";
   const sourcePathAllowlistRoots = (env.SOURCE_PATH_ALLOWLIST_ROOTS ?? "")
     .split(path.delimiter)
     .map((value) => value.trim())
@@ -57,6 +59,7 @@ export function loadServerConfig(env: NodeJS.ProcessEnv): ServerConfig {
     snapshotRetentionMax,
     hmacSecret,
     authToken,
+    devConsoleRedirectUrl,
     sourcePathAllowlistRoots,
     jobConcurrencyTotal,
     jobConcurrencyIo,

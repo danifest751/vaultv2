@@ -2,6 +2,23 @@ import { describe, expect, it } from "vitest";
 import { loadServerConfig } from "../server-config";
 
 describe("loadServerConfig", () => {
+  it("loads dev console redirect url from env", () => {
+    const config = loadServerConfig({
+      WAL_HMAC_SECRET: "secret",
+      DEV_CONSOLE_REDIRECT_URL: "http://127.0.0.1:5175/"
+    });
+
+    expect(config.devConsoleRedirectUrl).toBe("http://127.0.0.1:5175/");
+  });
+
+  it("uses empty dev console redirect url when env is missing", () => {
+    const config = loadServerConfig({
+      WAL_HMAC_SECRET: "secret"
+    });
+
+    expect(config.devConsoleRedirectUrl).toBe("");
+  });
+
   it("loads dedup thresholds from env", () => {
     const config = loadServerConfig({
       WAL_HMAC_SECRET: "secret",

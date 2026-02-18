@@ -31,6 +31,7 @@ export interface RequestHandlerOptions {
   authToken?: string;
   sourcePathAllowlistRoots?: string[];
   snapshotRetentionMax?: number;
+  uiRedirectUrl?: string;
 }
 
 interface ToolsHealthSnapshot {
@@ -226,6 +227,7 @@ function decodeBase64Url(input: string): Buffer {
 
 export function createRequestHandler(runtime: ServerRuntime, options: RequestHandlerOptions = {}) {
   const configuredToken = options.authToken?.trim() ?? "";
+  const uiRedirectUrl = options.uiRedirectUrl?.trim() ?? "";
   const snapshotRetentionMax = Number.isFinite(options.snapshotRetentionMax)
     ? Math.max(0, Math.floor(options.snapshotRetentionMax ?? 20))
     : 20;
@@ -294,6 +296,11 @@ export function createRequestHandler(runtime: ServerRuntime, options: RequestHan
       }
 
       if (method === "GET" && parts.length === 1 && parts[0] === "ui") {
+        if (uiRedirectUrl) {
+          res.writeHead(302, { location: uiRedirectUrl });
+          res.end();
+          return;
+        }
         sendHtml(res, 200, renderDevConsoleHtml());
         return;
       }

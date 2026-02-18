@@ -22,6 +22,7 @@ export async function startServer(config: ServerConfig): Promise<http.Server> {
   const server = http.createServer(
     createRequestHandler(runtime, {
       authToken: config.authToken,
+      uiRedirectUrl: config.devConsoleRedirectUrl,
       sourcePathAllowlistRoots: config.sourcePathAllowlistRoots,
       snapshotRetentionMax: config.snapshotRetentionMax
     })

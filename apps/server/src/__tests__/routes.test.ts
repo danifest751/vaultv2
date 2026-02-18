@@ -10,6 +10,7 @@ import { ServerRuntime } from "../bootstrap";
 interface StartServerOptions {
   authToken?: string;
   sourcePathAllowlistRoots?: string[];
+  uiRedirectUrl?: string;
 }
 
 function createRuntime(): ServerRuntime {
@@ -103,11 +104,26 @@ describe("server routes", () => {
     expect(text).toContain("id=\"view-tiles\"");
     expect(text).toContain("id=\"view-list\"");
     expect(text).toContain("id=\"view-table\"");
+    expect(text).toContain("id=\"tab-albums\"");
+    expect(text).toContain("id=\"albums-controls\"");
+    expect(text).toContain("id=\"album-create\"");
     expect(text).toContain("media-glyph");
     expect(text).toContain("data-thumb-src");
     expect(text).toContain("id=\"auth-token\"");
     expect(text).toContain("id=\"auth-token-save\"");
     expect(text).toContain("Delete source?\\n");
+  });
+
+  it("redirects ui page to configured web console url", async () => {
+    const runtime = createRuntime();
+    const { baseUrl } = await startServer(runtime, {
+      uiRedirectUrl: "http://127.0.0.1:5175/"
+    });
+
+    const response = await fetch(`${baseUrl}/ui`, { redirect: "manual" });
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("http://127.0.0.1:5175/");
   });
 
   it("requires auth token for protected routes when configured", async () => {

@@ -47,6 +47,7 @@ export function renderDevConsoleHtml(): string {
       .list.table-mode .item { display: grid; grid-template-columns: 24px 1fr auto; align-items: center; gap: 8px; }
       .item { border: 1px solid #1f2937; border-radius: 6px; padding: 8px; cursor: pointer; transition: all 0.15s; }
       .item:hover { border-color: #3b82f6; background: #0f1318; }
+      .item.active { border-color: #2563eb; background: #0f1318; }
       .item-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
       .item-id { font-size: 11px; color: #93c5fd; font-weight: 600; }
       .item-badge { font-size: 10px; padding: 2px 6px; border-radius: 3px; background: #374151; color: #e5e7eb; }
@@ -77,6 +78,18 @@ export function renderDevConsoleHtml(): string {
 
       .controls { display: flex; flex-direction: column; gap: 8px; }
       .control-row { display: flex; gap: 6px; align-items: center; }
+      .album-help { font-size: 10px; color: #9ca3af; }
+      .album-editor { display: flex; flex-direction: column; gap: 10px; }
+      .album-media-section { background: #0f1318; border-radius: 6px; padding: 8px; border: 1px solid #1f2937; }
+      .album-media-title { font-size: 10px; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
+      .album-media-selected { display: flex; flex-wrap: wrap; gap: 6px; max-height: 120px; overflow-y: auto; }
+      .album-media-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 4px; background: #1f2937; border: 1px solid #374151; font-size: 10px; }
+      .album-media-picker { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; margin-top: 6px; }
+      .album-media-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 6px; border-radius: 4px; border: 1px solid #1f2937; }
+      .album-media-row:hover { border-color: #3b82f6; }
+      .album-media-row-meta { display: flex; align-items: center; gap: 6px; min-width: 0; }
+      .album-media-row-id { font-size: 10px; color: #e5e7eb; word-break: break-all; }
+      .album-media-row-size { font-size: 10px; color: #9ca3af; white-space: nowrap; }
       input, select { background: #0f1318; color: #e5e7eb; border: 1px solid #374151; border-radius: 5px; padding: 7px 10px; font-size: 11px; font-family: inherit; }
       input.grow { flex: 1; }
       select { cursor: pointer; }
@@ -193,6 +206,7 @@ export function renderDevConsoleHtml(): string {
       <section class="panel">
         <div class="tabs">
           <button id="tab-media" class="tab active">📷 Media</button>
+          <button id="tab-albums" class="tab">📚 Albums</button>
           <button id="tab-quarantine" class="tab">⚠️ Quarantine</button>
           <button id="tab-duplicates" class="tab">🔗 Duplicates</button>
         </div>
@@ -212,6 +226,16 @@ export function renderDevConsoleHtml(): string {
           <option value="accepted">Accepted</option>
           <option value="rejected">Rejected</option>
         </select>
+        <div id="albums-controls" class="controls hidden" style="margin-bottom: 8px;">
+          <div class="control-row">
+            <input id="album-name" class="grow" placeholder="Album name" />
+            <button id="album-create" class="secondary" type="button">+ Create</button>
+          </div>
+          <div class="control-row">
+            <input id="album-media-ids" class="grow" placeholder="Media IDs (comma-separated, optional)" />
+          </div>
+          <div class="album-help">Tip: open Media tab and copy mediaId values for album mediaIds.</div>
+        </div>
         <div id="list" class="list"></div>
       </section>
 
@@ -250,9 +274,14 @@ export function renderDevConsoleHtml(): string {
       const detailViewEl = document.getElementById("detail-view");
       const detailPanelTitle = document.getElementById("detail-panel-title");
       const tabMedia = document.getElementById("tab-media");
+      const tabAlbums = document.getElementById("tab-albums");
       const tabQuarantine = document.getElementById("tab-quarantine");
       const tabDuplicates = document.getElementById("tab-duplicates");
       const quarantineFilter = document.getElementById("quarantine-filter");
+      const albumsControls = document.getElementById("albums-controls");
+      const albumNameInput = document.getElementById("album-name");
+      const albumMediaIdsInput = document.getElementById("album-media-ids");
+      const albumCreateBtn = document.getElementById("album-create");
       const sourcePathEl = document.getElementById("source-path");
       const sourceAddBtn = document.getElementById("source-add");
       const sourceBrowseBtn = document.getElementById("source-browse");
@@ -289,6 +318,10 @@ export function renderDevConsoleHtml(): string {
       let currentTab = "media";
       let currentItem = null;
       let sources = [];
+      let albums = [];
+      let selectedAlbumId = "";
+      let albumMediaCatalog = [];
+      let albumMediaCatalogTotal = 0;
       let selectedSourceId = "";
       let startTime = Date.now();
       let pollInterval = null;
@@ -318,6 +351,7 @@ export function renderDevConsoleHtml(): string {
           list: 300,
           table: 300
         },
+        albums: 300,
         quarantine: 300,
         duplicates: 300
       };
@@ -351,6 +385,48 @@ export function renderDevConsoleHtml(): string {
         const date = new Date(ts);
         return date.toLocaleTimeString();
       };
+
+      const parseMediaIdsInput = (raw) => {
+        if (typeof raw !== "string") {
+          return [];
+        }
+        const values = raw
+          .split(/[\\n,]/)
+          .map((value) => value.trim())
+          .filter(Boolean);
+        const seen = new Set();
+        const mediaIds = [];
+        for (const value of values) {
+          if (seen.has(value)) {
+            continue;
+          }
+          seen.add(value);
+          mediaIds.push(value);
+        }
+        return mediaIds;
+      };
+
+      const uniqueMediaIds = (values) => {
+        const seen = new Set();
+        const result = [];
+        for (const value of values) {
+          const normalized = typeof value === "string" ? value.trim() : "";
+          if (!normalized || seen.has(normalized)) {
+            continue;
+          }
+          seen.add(normalized);
+          result.push(normalized);
+        }
+        return result;
+      };
+
+      const escapeHtml = (value) =>
+        String(value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/\"/g, "&quot;")
+          .replace(/'/g, "&#39;");
 
       const hueFromMediaId = (mediaId) => {
         let hash = 0;
@@ -492,6 +568,282 @@ export function renderDevConsoleHtml(): string {
         }
       };
 
+      const ensureAlbumMediaCatalog = async (forceReload = false) => {
+        if (!forceReload && albumMediaCatalog.length > 0) {
+          return albumMediaCatalog;
+        }
+        const data = await fetchData("/media?limit=500&offset=0");
+        albumMediaCatalog = Array.isArray(data?.media) ? data.media : [];
+        albumMediaCatalogTotal = typeof data?.total === "number" ? data.total : albumMediaCatalog.length;
+        return albumMediaCatalog;
+      };
+
+      const createAlbum = async () => {
+        const name = albumNameInput ? albumNameInput.value.trim() : "";
+        if (!name) {
+          alert("Album name is required");
+          return;
+        }
+
+        const mediaIds = parseMediaIdsInput(albumMediaIdsInput ? albumMediaIdsInput.value : "");
+        if (albumCreateBtn) {
+          albumCreateBtn.disabled = true;
+          albumCreateBtn.textContent = "Creating...";
+        }
+
+        try {
+          const resp = await authFetch("/albums", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ name, mediaIds })
+          });
+          if (!resp.ok) {
+            const err = await resp.json().catch(() => ({ error: "unknown" }));
+            alert("Failed to create album: " + (err.error || "unknown"));
+            return;
+          }
+
+          const payload = await resp.json().catch(() => null);
+          if (payload && payload.album && payload.album.albumId) {
+            selectedAlbumId = payload.album.albumId;
+          }
+
+          if (albumNameInput) {
+            albumNameInput.value = "";
+          }
+          if (albumMediaIdsInput) {
+            albumMediaIdsInput.value = "";
+          }
+
+          await loadAllData();
+          await loadTab("albums");
+        } finally {
+          if (albumCreateBtn) {
+            albumCreateBtn.disabled = false;
+            albumCreateBtn.textContent = "+ Create";
+          }
+        }
+      };
+
+      const updateAlbum = async (albumId, options = {}) => {
+        const nameInput = document.getElementById("album-edit-name");
+        const mediaIdsInput = document.getElementById("album-edit-media-ids");
+        const fallbackName = nameInput ? nameInput.value.trim() : "";
+        const name = typeof options.name === "string" ? options.name.trim() : fallbackName;
+        if (!name) {
+          alert("Album name is required");
+          return;
+        }
+        const fallbackMediaIds = parseMediaIdsInput(mediaIdsInput ? mediaIdsInput.value : "");
+        const mediaIds = Array.isArray(options.mediaIds)
+          ? uniqueMediaIds(options.mediaIds)
+          : fallbackMediaIds;
+        const resp = await authFetch("/albums/" + encodeURIComponent(albumId), {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name, mediaIds })
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({ error: "unknown" }));
+          alert("Failed to update album: " + (err.error || "unknown"));
+          return;
+        }
+
+        selectedAlbumId = albumId;
+        await loadAllData();
+        await loadTab("albums");
+      };
+
+      const removeAlbum = async (albumId, albumName) => {
+        if (!confirm("Delete album?\\n" + (albumName || albumId))) {
+          return;
+        }
+        const resp = await authFetch("/albums/" + encodeURIComponent(albumId), {
+          method: "DELETE"
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({ error: "unknown" }));
+          alert("Failed to delete album: " + (err.error || "unknown"));
+          return;
+        }
+
+        if (selectedAlbumId === albumId) {
+          selectedAlbumId = "";
+        }
+        clearDetail();
+        await loadAllData();
+        await loadTab("albums");
+      };
+
+      const viewAlbum = async (album) => {
+        if (!album) {
+          clearDetail();
+          return;
+        }
+
+        currentItem = album;
+        selectedAlbumId = album.albumId;
+
+        await ensureAlbumMediaCatalog();
+        let draftMediaIds = uniqueMediaIds(Array.isArray(album.mediaIds) ? album.mediaIds : []);
+        detailViewEl.innerHTML =
+          renderDetailKV("📚 Album", [
+            ["albumId", album.albumId],
+            ["name", album.name || "-"],
+            ["mediaCount", draftMediaIds.length],
+            ["createdAt", fmtTime(album.createdAt)],
+            ["updatedAt", fmtTime(album.updatedAt)]
+          ]) +
+          '<div class="album-editor">' +
+          '<div class="quarantine-actions">' +
+          '<input id="album-edit-name" placeholder="Album name" style="flex:1;" value="' + escapeHtml(album.name || "") + '" />' +
+          '<button id="album-save-btn" class="small">Save</button>' +
+          '<button id="album-delete-btn" class="small danger">Delete</button>' +
+          '</div>' +
+          '<div class="album-media-section">' +
+          '<div class="album-media-title">Selected media</div>' +
+          '<div id="album-selected-media" class="album-media-selected"></div>' +
+          '</div>' +
+          '<div class="album-media-section">' +
+          '<div class="album-media-title">Add media from vault</div>' +
+          '<div class="control-row">' +
+          '<input id="album-media-search" class="grow" placeholder="Search by mediaId / sha256" />' +
+          '<button id="album-media-reload" class="secondary small" type="button">↻</button>' +
+          '</div>' +
+          '<div id="album-media-picker" class="album-media-picker"></div>' +
+          '<div class="album-help" id="album-media-hint"></div>' +
+          '</div>' +
+          '</div>';
+
+        const selectedContainer = document.getElementById("album-selected-media");
+        const pickerContainer = document.getElementById("album-media-picker");
+        const searchInput = document.getElementById("album-media-search");
+        const reloadBtn = document.getElementById("album-media-reload");
+        const hintEl = document.getElementById("album-media-hint");
+
+        const renderSelectedMedia = () => {
+          if (!selectedContainer) {
+            return;
+          }
+          if (draftMediaIds.length === 0) {
+            selectedContainer.innerHTML = '<div class="empty" style="padding:8px;">No media in album</div>';
+            return;
+          }
+          selectedContainer.innerHTML = draftMediaIds
+            .map(
+              (mediaId) =>
+                '<div class="album-media-chip">' +
+                '<span>' + escapeHtml(mediaId) + '</span>' +
+                '<button class="danger small" type="button" data-remove-media-id="' + escapeHtml(mediaId) + '">×</button>' +
+                '</div>'
+            )
+            .join("");
+        };
+
+        const renderMediaPicker = () => {
+          if (!pickerContainer) {
+            return;
+          }
+          const query = (searchInput?.value ?? "").trim().toLowerCase();
+          const selectedSet = new Set(draftMediaIds);
+          const candidates = albumMediaCatalog.filter((item) => {
+            if (selectedSet.has(item.mediaId)) {
+              return false;
+            }
+            if (!query) {
+              return true;
+            }
+            return item.mediaId.toLowerCase().includes(query) || item.sha256.toLowerCase().includes(query);
+          });
+          const visible = candidates.slice(0, 120);
+          if (visible.length === 0) {
+            pickerContainer.innerHTML = '<div class="empty" style="padding:8px;">No media matches filter</div>';
+          } else {
+            pickerContainer.innerHTML = visible
+              .map(
+                (item) =>
+                  '<div class="album-media-row">' +
+                  '<div class="album-media-row-meta">' +
+                  renderMediaGlyph(item.mediaId, "small") +
+                  '<div>' +
+                  '<div class="album-media-row-id">' + escapeHtml(item.mediaId) + '</div>' +
+                  '<div class="album-media-row-size">' + fmtBytes(item.size) + ' • ' + escapeHtml(item.sha256.slice(0, 8)) + '...</div>' +
+                  '</div>' +
+                  '</div>' +
+                  '<button class="small secondary" type="button" data-add-media-id="' + escapeHtml(item.mediaId) + '">Add</button>' +
+                  '</div>'
+              )
+              .join("");
+          }
+          if (hintEl) {
+            hintEl.textContent =
+              'Loaded ' + albumMediaCatalog.length +
+              ' media items' +
+              (albumMediaCatalogTotal > albumMediaCatalog.length ? ' of ' + albumMediaCatalogTotal : '') +
+              '.';
+          }
+        };
+
+        renderSelectedMedia();
+        renderMediaPicker();
+
+        selectedContainer?.addEventListener("click", (event) => {
+          const target = event.target;
+          if (!(target instanceof HTMLElement)) {
+            return;
+          }
+          const mediaId = target.getAttribute("data-remove-media-id");
+          if (!mediaId) {
+            return;
+          }
+          draftMediaIds = draftMediaIds.filter((id) => id !== mediaId);
+          renderSelectedMedia();
+          renderMediaPicker();
+        });
+
+        pickerContainer?.addEventListener("click", (event) => {
+          const target = event.target;
+          if (!(target instanceof HTMLElement)) {
+            return;
+          }
+          const mediaId = target.getAttribute("data-add-media-id");
+          if (!mediaId) {
+            return;
+          }
+          draftMediaIds = uniqueMediaIds([...draftMediaIds, mediaId]);
+          renderSelectedMedia();
+          renderMediaPicker();
+        });
+
+        searchInput?.addEventListener("input", () => {
+          renderMediaPicker();
+        });
+
+        reloadBtn?.addEventListener("click", async () => {
+          await ensureAlbumMediaCatalog(true);
+          renderMediaPicker();
+        });
+
+        setTimeout(() => {
+          const saveBtn = document.getElementById("album-save-btn");
+          const deleteBtn = document.getElementById("album-delete-btn");
+          const nameInput = document.getElementById("album-edit-name");
+          if (saveBtn) {
+            saveBtn.addEventListener("click", () => {
+              updateAlbum(album.albumId, {
+                name: nameInput ? nameInput.value : album.name,
+                mediaIds: draftMediaIds
+              });
+            });
+          }
+          if (deleteBtn) {
+            deleteBtn.addEventListener("click", () => {
+              removeAlbum(album.albumId, album.name);
+            });
+          }
+        }, 0);
+      };
+
       const buildHeaders = (extraHeaders) => {
         const headers = { ...(extraHeaders || {}) };
         if (authToken) {
@@ -538,8 +890,9 @@ export function renderDevConsoleHtml(): string {
       };
 
       const loadAllData = async () => {
-        const [sourcesData, mediaData, entriesData, quarantineData, duplicateData, jobsData] = await Promise.all([
+        const [sourcesData, albumsData, mediaData, entriesData, quarantineData, duplicateData, jobsData] = await Promise.all([
           fetchData("/sources"),
+          fetchData("/albums"),
           fetchData("/media?limit=1&offset=0"),
           fetchData("/entries"),
           fetchData("/quarantine"),
@@ -548,6 +901,10 @@ export function renderDevConsoleHtml(): string {
         ]);
 
         sources = sourcesData?.sources ?? [];
+        albums = albumsData?.albums ?? [];
+        if (selectedAlbumId && !albums.some((album) => album.albumId === selectedAlbumId)) {
+          selectedAlbumId = "";
+        }
         const jobs = jobsData?.jobs ?? [];
         const activeJobs = jobs.filter(j => j.status === "queued" || j.status === "running");
         activeJobCount = activeJobs.length;
@@ -810,7 +1167,9 @@ export function renderDevConsoleHtml(): string {
             ? "/media?limit=" + mediaPageLimit + "&offset=" + mediaPageOffset
             : tab === "quarantine"
               ? "/quarantine" + (quarantineFilter.value ? "?status=" + quarantineFilter.value : "")
-              : "/duplicate-links"
+              : tab === "duplicates"
+                ? "/duplicate-links"
+                : "/albums"
         );
 
         if (!data) {
@@ -818,13 +1177,17 @@ export function renderDevConsoleHtml(): string {
           return;
         }
 
-        const items = data.media || data.items || data.links || [];
+        const items = data.media || data.items || data.links || data.albums || [];
         if (tab === "media") {
           mediaPageTotal = typeof data.total === "number" ? data.total : items.length;
           renderMediaPaginationControls();
         }
         if (items.length === 0) {
-          renderEmpty("No data. Add source and run scan.");
+          if (tab === "albums") {
+            renderEmpty("No albums. Create one with form above.");
+          } else {
+            renderEmpty("No data. Add source and run scan.");
+          }
           return;
         }
 
@@ -842,6 +1205,8 @@ export function renderDevConsoleHtml(): string {
           let maxItemsToRender = MAX_ITEMS_PER_VIEW.duplicates;
           if (tab === "quarantine") {
             maxItemsToRender = MAX_ITEMS_PER_VIEW.quarantine;
+          } else if (tab === "albums") {
+            maxItemsToRender = MAX_ITEMS_PER_VIEW.albums;
           }
           visibleItems = items.length > maxItemsToRender ? items.slice(0, maxItemsToRender) : items;
           limitNotice =
@@ -897,6 +1262,13 @@ export function renderDevConsoleHtml(): string {
               '<div class="item-header"><span class="item-id">' + item.quarantineId + '</span>' +
               '<span class="item-badge">' + item.status + '</span></div>' +
               '<div class="item-meta">' + candidates + ' candidates | ' + item.sourceEntryId + '</div></div>';
+          } else if (tab === "albums") {
+            const mediaCount = Array.isArray(item.mediaIds) ? item.mediaIds.length : 0;
+            const activeClass = item.albumId === selectedAlbumId ? ' active' : '';
+            return '<div class="item' + activeClass + '" data-album-data="' + encodeURIComponent(JSON.stringify(item)) + '">' +
+              '<div class="item-header"><span class="item-id">' + (item.name || item.albumId) + '</span>' +
+              '<span class="item-badge">' + mediaCount + ' media</span></div>' +
+              '<div class="item-meta">' + item.albumId + '</div></div>';
           }
           return '<div class="item" data-duplicate-id="' + item.duplicateLinkId + '" data-duplicate-data="' + encodeURIComponent(JSON.stringify(item)) + '">' +
             '<div class="item-header"><span class="item-id">' + item.duplicateLinkId + '</span>' +
@@ -911,11 +1283,17 @@ export function renderDevConsoleHtml(): string {
           const mediaId = itemEl.getAttribute('data-media-id');
           const quarantineId = itemEl.getAttribute('data-quarantine-id');
           const duplicateData = itemEl.getAttribute('data-duplicate-data');
+          const albumData = itemEl.getAttribute('data-album-data');
 
           if (mediaId) {
             await viewMedia(mediaId);
           } else if (quarantineId) {
             await viewQuarantine(quarantineId);
+          } else if (albumData) {
+            const album = JSON.parse(decodeURIComponent(albumData));
+            selectedAlbumId = album.albumId;
+            await loadTab("albums");
+            await viewAlbum(album);
           } else if (duplicateData) {
             viewDuplicate(JSON.parse(decodeURIComponent(duplicateData)));
           }
@@ -1081,9 +1459,11 @@ export function renderDevConsoleHtml(): string {
       const setTab = (tab) => {
         currentTab = tab;
         tabMedia.classList.toggle("active", tab === "media");
+        tabAlbums.classList.toggle("active", tab === "albums");
         tabQuarantine.classList.toggle("active", tab === "quarantine");
         tabDuplicates.classList.toggle("active", tab === "duplicates");
         quarantineFilter.classList.toggle("hidden", tab !== "quarantine");
+        albumsControls.classList.toggle("hidden", tab !== "albums");
         renderMediaViewControls();
         renderMediaPaginationControls();
         clearDetail();
@@ -1110,6 +1490,10 @@ export function renderDevConsoleHtml(): string {
       if (tabMedia) tabMedia.addEventListener("click", () => {
         console.log("Tab Media clicked");
         setTab("media");
+      });
+      if (tabAlbums) tabAlbums.addEventListener("click", () => {
+        console.log("Tab Albums clicked");
+        setTab("albums");
       });
       if (tabQuarantine) tabQuarantine.addEventListener("click", () => {
         console.log("Tab Quarantine clicked");
@@ -1152,6 +1536,19 @@ export function renderDevConsoleHtml(): string {
         });
       } else {
         console.error("sourceAddBtn is NULL!");
+      }
+      if (albumCreateBtn) {
+        albumCreateBtn.addEventListener("click", () => {
+          createAlbum();
+        });
+      }
+      if (albumNameInput) {
+        albumNameInput.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            createAlbum();
+          }
+        });
       }
       sourceScanBtn.addEventListener("click", scanSource);
       sourceBrowseBtn.addEventListener("click", pickSourcePath);
