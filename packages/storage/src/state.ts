@@ -1,4 +1,6 @@
 import {
+  Album,
+  AlbumId,
   DomainEvent,
   DuplicateLink,
   Media,
@@ -21,6 +23,16 @@ export interface MediaSearchFilters {
   takenDay?: string;
   gpsTile?: string;
   sha256Prefix?: string;
+}
+
+function cloneAlbum(album: Album): Album {
+  return {
+    albumId: album.albumId,
+    name: album.name,
+    mediaIds: [...album.mediaIds],
+    createdAt: album.createdAt,
+    updatedAt: album.updatedAt
+  };
 }
 
 export type MediaSearchSort = "mediaId_asc" | "takenAt_desc";
@@ -438,6 +450,37 @@ export class QuarantineStore {
   }
 }
 
+export class AlbumStore {
+  private readonly albums = new Map<AlbumId, Album>();
+
+  applyEvent(event: DomainEvent): void {
+    switch (event.type) {
+      case "ALBUM_CREATED":
+      case "ALBUM_UPDATED":
+        this.set(event.payload.album);
+        return;
+      case "ALBUM_REMOVED":
+        this.albums.delete(event.payload.albumId);
+        return;
+      default:
+        return;
+    }
+  }
+
+  get(albumId: AlbumId): Album | undefined {
+    const album = this.albums.get(albumId);
+    return album ? cloneAlbum(album) : undefined;
+  }
+
+  list(): Album[] {
+    return Array.from(this.albums.values()).map((album) => cloneAlbum(album));
+  }
+
+  set(album: Album): void {
+    this.albums.set(album.albumId, cloneAlbum(album));
+  }
+}
+
 export class MediaSearchIndexStore {
   private readonly kindIndex = new Map<string, Set<MediaId>>();
   private readonly mimeTypeIndex = new Map<string, Set<MediaId>>();
@@ -775,6 +818,7 @@ export class DomainState {
   readonly metadata = new MediaMetadataStore();
   readonly duplicateLinks = new DuplicateLinkStore();
   readonly quarantine = new QuarantineStore();
+  readonly albums = new AlbumStore();
   readonly mediaSearch = new MediaSearchIndexStore();
 
   applyEvent(event: DomainEvent): void {
@@ -784,6 +828,7 @@ export class DomainState {
     this.metadata.applyEvent(event);
     this.duplicateLinks.applyEvent(event);
     this.quarantine.applyEvent(event);
+    this.albums.applyEvent(event);
     this.mediaSearch.applyEvent(event, this);
   }
 

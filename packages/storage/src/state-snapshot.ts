@@ -1,4 +1,5 @@
 import {
+  Album,
   DuplicateLink,
   Media,
   MediaId,
@@ -11,6 +12,7 @@ import {
 import { DomainState, IngestStatus } from "./state";
 
 export type DomainSnapshotRecord =
+  | { kind: "album"; album: Album }
   | { kind: "duplicateLink"; link: DuplicateLink }
   | { kind: "source"; source: Source }
   | { kind: "sourceEntry"; entry: SourceEntry }
@@ -20,6 +22,9 @@ export type DomainSnapshotRecord =
   | { kind: "quarantine"; item: QuarantineItem };
 
 export function* snapshotDomainState(state: DomainState): Iterable<DomainSnapshotRecord> {
+  for (const album of state.albums.list()) {
+    yield { kind: "album", album };
+  }
   for (const source of state.sources.listSources()) {
     yield { kind: "source", source };
   }
@@ -62,6 +67,9 @@ export async function rebuildDomainStateFromSnapshot(
 
 function applySnapshotRecord(state: DomainState, record: DomainSnapshotRecord): void {
   switch (record.kind) {
+    case "album":
+      state.albums.set(record.album);
+      return;
     case "duplicateLink":
       state.duplicateLinks.set(record.link);
       return;

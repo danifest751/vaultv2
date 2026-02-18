@@ -6,10 +6,12 @@ import { IncomingMessage, ServerResponse } from "node:http";
 import {
   JsonObject,
   Source,
+  asAlbumId,
   asMediaId,
   asQuarantineItemId,
   asSourceEntryId,
   asSourceId,
+  newAlbumId,
   newSourceId,
   createEvent
 } from "@family-media-vault/core";
@@ -94,6 +96,33 @@ function normalizeSha256PrefixFilter(value: string | null): string | undefined {
     return undefined;
   }
   return normalized;
+}
+
+function parseAlbumMediaIds(raw: unknown): Array<ReturnType<typeof asMediaId>> | null {
+  if (!Array.isArray(raw)) {
+    return null;
+  }
+
+  const seen = new Set<string>();
+  const mediaIds: Array<ReturnType<typeof asMediaId>> = [];
+  for (const item of raw) {
+    if (typeof item !== "string") {
+      return null;
+    }
+    const normalized = item.trim();
+    if (!normalized) {
+      return null;
+    }
+    const mediaId = asMediaId(normalized);
+    const key = String(mediaId);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    mediaIds.push(mediaId);
+  }
+
+  return mediaIds;
 }
 
 function isAuthorizedRequest(req: IncomingMessage, configuredToken: string): boolean {
@@ -456,12 +485,102 @@ export function createRequestHandler(runtime: ServerRuntime, options: RequestHan
       if (method === "DELETE" && parts.length === 2 && parts[0] === "sources") {
         const sourceId = asSourceId(parts[1] ?? "");
         const existing = runtime.state.sources.getSource(sourceId);
-        if (!existing) {
-          sendJson(res, 404, { error: "source_not_found" });
+        await runtime.appendEvent(createEvent("SOURCE_REMOVED", { sourceId }));
+        sendJson(res, 200, { sourceId });
+        return;
+      }
+
+      if (method === "GET" && parts.length === 1 && parts[0] === "albums") {
+        sendJson(res, 200, { albums: runtime.state.albums.list() });
+        return;
+      }
+
+      if (method === "POST" && parts.length === 1 && parts[0] === "albums") {
+        const body = await readJson(req);
+        const name = typeof body.name === "string" ? body.name.trim() : "";
+        if (!name) {
+          sendJson(res, 400, { error: "album_name_required" });
           return;
         }
-        await runtime.appendEvent(createEvent("SOURCE_REMOVED", { sourceId }));
-        sendJson(res, 200, { ok: true });
+
+        const mediaIds = parseAlbumMediaIds(body.mediaIds ?? []);
+        if (!mediaIds) {
+          sendJson(res, 400, { error: "invalid_album_media_ids" });
+          return;
+        }
+        if (mediaIds.some((mediaId) => !runtime.state.media.get(mediaId))) {
+          sendJson(res, 400, { error: "album_media_not_found" });
+          return;
+        }
+
+        const now = Date.now();
+        const album = {
+          albumId: newAlbumId(),
+          name,
+          mediaIds,
+          createdAt: now,
+          updatedAt: now
+        };
+
+        await runtime.appendEvent(createEvent("ALBUM_CREATED", { album }));
+        sendJson(res, 201, { album });
+        return;
+      }
+
+      if (method === "PATCH" && parts.length === 2 && parts[0] === "albums") {
+        const albumId = asAlbumId(parts[1] ?? "");
+        const existing = runtime.state.albums.get(albumId);
+        if (!existing) {
+          sendJson(res, 404, { error: "album_not_found" });
+          return;
+        }
+
+        const body = await readJson(req);
+        const hasName = Object.prototype.hasOwnProperty.call(body, "name");
+        const hasMediaIds = Object.prototype.hasOwnProperty.call(body, "mediaIds");
+        if (!hasName && !hasMediaIds) {
+          sendJson(res, 400, { error: "album_patch_empty" });
+          return;
+        }
+
+        const nextName = hasName ? (typeof body.name === "string" ? body.name.trim() : "") : existing.name;
+        if (!nextName) {
+          sendJson(res, 400, { error: "album_name_required" });
+          return;
+        }
+
+        const parsedMediaIds = hasMediaIds ? parseAlbumMediaIds(body.mediaIds) : existing.mediaIds;
+        if (!parsedMediaIds) {
+          sendJson(res, 400, { error: "invalid_album_media_ids" });
+          return;
+        }
+        if (parsedMediaIds.some((mediaId) => !runtime.state.media.get(mediaId))) {
+          sendJson(res, 400, { error: "album_media_not_found" });
+          return;
+        }
+
+        const album = {
+          ...existing,
+          name: nextName,
+          mediaIds: parsedMediaIds,
+          updatedAt: Date.now()
+        };
+
+        await runtime.appendEvent(createEvent("ALBUM_UPDATED", { album }));
+        sendJson(res, 200, { album });
+        return;
+      }
+
+      if (method === "DELETE" && parts.length === 2 && parts[0] === "albums") {
+        const albumId = asAlbumId(parts[1] ?? "");
+        const existing = runtime.state.albums.get(albumId);
+        if (!existing) {
+          sendJson(res, 404, { error: "album_not_found" });
+          return;
+        }
+
+        await runtime.appendEvent(createEvent("ALBUM_REMOVED", { albumId }));
+        sendJson(res, 200, { albumId });
         return;
       }
 

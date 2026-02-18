@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  AlbumId,
   DuplicateLinkId,
   EventId,
   JobId,
@@ -87,6 +88,14 @@ export interface QuarantineItem {
   rejectedReason?: string;
 }
 
+export interface Album {
+  albumId: AlbumId;
+  name: string;
+  mediaIds: MediaId[];
+  createdAt: TimestampMs;
+  updatedAt: TimestampMs;
+}
+
 export type EventType =
   | "SOURCE_CREATED"
   | "SOURCE_UPDATED"
@@ -101,6 +110,9 @@ export type EventType =
   | "QUARANTINE_CREATED"
   | "QUARANTINE_ACCEPTED"
   | "QUARANTINE_REJECTED"
+  | "ALBUM_CREATED"
+  | "ALBUM_UPDATED"
+  | "ALBUM_REMOVED"
   | "JOB_ENQUEUED"
   | "JOB_STARTED"
   | "JOB_RETRY_SCHEDULED"
@@ -137,6 +149,9 @@ export type EventPayloads = {
     resolvedAt: TimestampMs;
     reason?: string;
   };
+  ALBUM_CREATED: { album: Album };
+  ALBUM_UPDATED: { album: Album };
+  ALBUM_REMOVED: { albumId: AlbumId };
   JOB_ENQUEUED: { jobId: JobId; kind: string; payload?: JsonObject };
   JOB_STARTED: { jobId: JobId; kind: string; attempt: number };
   JOB_RETRY_SCHEDULED: {

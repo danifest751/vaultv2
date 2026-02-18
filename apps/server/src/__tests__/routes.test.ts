@@ -246,6 +246,125 @@ describe("server routes", () => {
     expect(body.error).toBe("source_path_not_allowed");
   });
 
+  it("supports albums CRUD", async () => {
+    const runtime = createRuntime();
+    runtime.appendEvent = async (event) => {
+      runtime.state.applyEvent(event as never);
+    };
+    const sourceId = newSourceId();
+    const sourceEntryId = newSourceEntryId();
+    const mediaId = newMediaId();
+
+    runtime.state.applyEvent(
+      createEvent("SOURCE_CREATED", {
+        source: {
+          sourceId,
+          path: "C:/tmp/source",
+          recursive: true,
+          includeArchives: false,
+          excludeGlobs: [],
+          createdAt: Date.now()
+        }
+      })
+    );
+    runtime.state.applyEvent(
+      createEvent("SOURCE_ENTRY_UPSERTED", {
+        entry: {
+          sourceEntryId,
+          sourceId,
+          kind: "file",
+          path: "C:/tmp/source/a.jpg",
+          size: 11,
+          mtimeMs: Date.now(),
+          fingerprint: "11:1:head-a",
+          lastSeenAt: Date.now(),
+          state: "active"
+        }
+      })
+    );
+    runtime.state.applyEvent(
+      createEvent("MEDIA_IMPORTED", {
+        media: {
+          mediaId,
+          sha256: "a".repeat(64),
+          size: 11,
+          sourceEntryId
+        }
+      })
+    );
+
+    const { baseUrl } = await startServer(runtime);
+
+    const createResponse = await fetch(`${baseUrl}/albums`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Trip", mediaIds: [mediaId, mediaId] })
+    });
+    const createBody = (await createResponse.json()) as {
+      album: { albumId: string; name: string; mediaIds: string[] };
+    };
+
+    expect(createResponse.status).toBe(201);
+    expect(createBody.album.name).toBe("Trip");
+    expect(createBody.album.mediaIds).toEqual([mediaId]);
+    expect(runtime.state.albums.list()).toHaveLength(1);
+
+    const albumId = createBody.album.albumId;
+    const listResponse = await fetch(`${baseUrl}/albums`);
+    const listBody = (await listResponse.json()) as {
+      albums: Array<{ albumId: string; name: string; mediaIds: string[] }>;
+    };
+
+    expect(listResponse.status).toBe(200);
+    expect(listBody.albums).toHaveLength(1);
+    expect(listBody.albums[0]?.albumId).toBe(albumId);
+
+    const updateResponse = await fetch(`${baseUrl}/albums/${encodeURIComponent(albumId)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Trip 2026" })
+    });
+    const updateBody = (await updateResponse.json()) as {
+      album: { albumId: string; name: string; mediaIds: string[] };
+    };
+
+    expect(updateResponse.status).toBe(200);
+    expect(updateBody.album.albumId).toBe(albumId);
+    expect(updateBody.album.name).toBe("Trip 2026");
+    expect(updateBody.album.mediaIds).toEqual([mediaId]);
+
+    const deleteResponse = await fetch(`${baseUrl}/albums/${encodeURIComponent(albumId)}`, {
+      method: "DELETE"
+    });
+    const deleteBody = (await deleteResponse.json()) as { albumId: string };
+
+    expect(deleteResponse.status).toBe(200);
+    expect(deleteBody.albumId).toBe(albumId);
+
+    const listAfterDeleteResponse = await fetch(`${baseUrl}/albums`);
+    const listAfterDeleteBody = (await listAfterDeleteResponse.json()) as {
+      albums: Array<{ albumId: string }>;
+    };
+
+    expect(listAfterDeleteResponse.status).toBe(200);
+    expect(listAfterDeleteBody.albums).toHaveLength(0);
+  });
+
+  it("validates album mediaIds existence", async () => {
+    const runtime = createRuntime();
+    const { baseUrl } = await startServer(runtime);
+
+    const response = await fetch(`${baseUrl}/albums`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Trip", mediaIds: ["med_missing"] })
+    });
+    const body = (await response.json()) as { error: string };
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe("album_media_not_found");
+  });
+
   it("returns paginated media payload shape", async () => {
     const runtime = createRuntime();
     const { baseUrl } = await startServer(runtime);

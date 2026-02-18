@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   createEvent,
+  newAlbumId,
   newDuplicateLinkId,
   newMediaId,
   newQuarantineItemId,
@@ -30,6 +31,7 @@ describe("state snapshot", () => {
     const mediaId = newMediaId();
     const quarantineId = newQuarantineItemId();
     const duplicateLinkId = newDuplicateLinkId();
+    const albumId = newAlbumId();
 
     const sourceCreated = createEvent("SOURCE_CREATED", {
       source: {
@@ -39,6 +41,16 @@ describe("state snapshot", () => {
         includeArchives: false,
         excludeGlobs: [],
         createdAt: 1
+      }
+    });
+
+    const albumCreated = createEvent("ALBUM_CREATED", {
+      album: {
+        albumId,
+        name: "Trip",
+        mediaIds: [mediaId],
+        createdAt: 6,
+        updatedAt: 6
       }
     });
 
@@ -137,7 +149,8 @@ describe("state snapshot", () => {
       metadataExtracted,
       quarantineCreated,
       quarantineAccepted,
-      duplicateLinkCreated
+      duplicateLinkCreated,
+      albumCreated
     ]) {
       state.applyEvent(event);
     }
@@ -185,5 +198,14 @@ describe("state snapshot", () => {
     expect(rebuiltQuarantine?.acceptedMediaId).toBe(mediaId);
     expect(rebuiltQuarantine?.resolvedAt).toBe(5);
     expect(rebuilt.duplicateLinks.list()).toHaveLength(1);
+    expect(rebuilt.albums.list()).toEqual([
+      {
+        albumId,
+        name: "Trip",
+        mediaIds: [mediaId],
+        createdAt: 6,
+        updatedAt: 6
+      }
+    ]);
   });
 });
