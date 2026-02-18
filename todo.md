@@ -153,3 +153,34 @@
 ### Подзадачи
 - [x] Автоматически переносить повреждённый WAL и стартовать с чистого
 - [x] Проверить build/test
+
+## 2026-02-18 — Handoff: что делать дальше (Dev Console v2)
+
+### Текущий статус
+- [x] Dev Console v2 вынесен в `apps/web/src/dev-console/*` и разделён на секции.
+- [x] `/ui` на сервере умеет редиректить в web UI через `DEV_CONSOLE_REDIRECT_URL`.
+- [x] Прокси web UI на backend сделан настраиваемым через `FMV_API_PROXY_TARGET`.
+
+### Следующие шаги (приоритет)
+1. **Вынести orchestration-логику из `DevConsoleApp.tsx` в hooks**
+   - создать `apps/web/src/dev-console/hooks/useDevConsoleState.ts`
+   - перенести `load*` / `handle*` функции и связанные состояния
+   - оставить в `DevConsoleApp` только layout + маршрутизацию секций
+
+2. **Финализировать переход на новый UI по `/ui`**
+   - в dev окружении использовать:
+     - `DEV_CONSOLE_REDIRECT_URL=http://127.0.0.1:5175/`
+     - `FMV_API_PROXY_TARGET=http://127.0.0.1:3003` (или актуальный порт backend)
+   - после стабилизации решить судьбу legacy `apps/server/src/ui.ts` (оставить fallback или удалить)
+
+3. **Улучшить UX сообщений/ошибок**
+   - сделать scoped-ошибки по секциям вместо одного глобального banner
+   - добавить авто-очистку success сообщений и явный сброс старых error
+
+4. **Добавить интеграционные smoke-тесты для Dev Console v2**
+   - проверка базовых сценариев: create source, scan, create/update/delete album
+   - проверка отказа без токена и восстановления после refresh
+
+### Минимальный чек перед продолжением
+- `npm run web:build`
+- `npm test -- apps/web/src/__tests__/album-media-utils.test.ts apps/web/src/__tests__/media-view-utils.test.ts apps/web/src/__tests__/duplicate-filter-utils.test.ts apps/web/src/__tests__/job-status-utils.test.ts apps/web/src/__tests__/format-utils.test.ts apps/web/src/__tests__/error-utils.test.ts apps/web/src/__tests__/navigation.test.ts apps/web/src/__tests__/metrics-utils.test.ts apps/web/src/__tests__/media-search-utils.test.ts`
